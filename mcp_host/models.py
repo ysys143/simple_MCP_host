@@ -70,9 +70,7 @@ class ParsedIntent:
         return self.intent_type in [
             IntentType.WEATHER_QUERY,
             IntentType.FILE_OPERATION, 
-            IntentType.API_REQUEST,
-            IntentType.SERVER_STATUS,
-            IntentType.TOOL_LIST
+            IntentType.API_REQUEST
         ]
 
 

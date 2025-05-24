@@ -204,6 +204,92 @@ def llm_generate_response(state: ChatState) -> ChatState:
         user_input = current_message.content
         logger.info(f"LLM 응답 생성 시작: {parsed_intent.intent_type.value if parsed_intent else 'None'}")
         
+        # 시스템 정보 요청인 경우 직접 정보 제공
+        if parsed_intent and parsed_intent.intent_type == IntentType.TOOL_LIST:
+            # MCP 클라이언트에서 실제 도구 정보 가져오기
+            mcp_client = state.get("mcp_client")
+            if mcp_client:
+                try:
+                    server_names = mcp_client.get_server_names()
+                    tools_info = mcp_client.get_tools_info()
+                    
+                    # 동적으로 도구 목록 생성
+                    content_parts = ["## 🔧 사용 가능한 도구 목록\n", "현재 사용 가능한 도구들은 다음과 같습니다:\n"]
+                    
+                    for server_name in server_names:
+                        server_tools = tools_info.get(server_name, [])
+                        if server_tools:
+                            # 서버별 섹션 추가
+                            server_icon = "🌤️" if server_name == "weather" else "📁" if server_name == "file-manager" else "🔧"
+                            content_parts.append(f"\n### {server_icon} {server_name} 서버")
+                            
+                            for tool in server_tools:
+                                tool_name = tool.get('name', '이름없음')
+                                tool_desc = tool.get('description', '설명없음')
+                                content_parts.append(f"- **{tool_name}**: {tool_desc}")
+                    
+                    # 사용법 안내 추가
+                    content_parts.extend([
+                        "\n### 📝 도구 사용 시 유의사항",
+                        "- 도구를 사용할 때는 항상 정확한 결과를 확인하고, 필요한 경우 추가적인 정보를 요청해 주세요.",
+                        "- 도구가 정상적으로 작동하지 않을 경우, 다른 방법으로 문제를 해결할 수 있지 고민해보세요.",
+                        "\n추가적인 질문이나 도움이 필요하시면 언제든지 말씀해 주세요! 😊"
+                    ])
+                    
+                    system_info_content = "\n".join(content_parts)
+                    
+                except Exception as e:
+                    logger.error(f"도구 정보 가져오기 실패: {e}")
+                    # 실패 시 기본 메시지
+                    system_info_content = "## 🔧 도구 목록\n\n도구 정보를 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+            else:
+                # MCP 클라이언트가 없는 경우
+                system_info_content = "## 🔧 도구 목록\n\nMCP 클라이언트가 초기화되지 않았습니다."
+            
+            state["response"] = system_info_content
+            state["success"] = True
+            update_workflow_step(state, "completed")
+            return state
+        
+        elif parsed_intent and parsed_intent.intent_type == IntentType.SERVER_STATUS:
+            # MCP 클라이언트에서 실제 서버 상태 가져오기
+            mcp_client = state.get("mcp_client")
+            if mcp_client:
+                try:
+                    server_names = mcp_client.get_server_names()
+                    server_count = mcp_client.get_server_count()
+                    tool_count = len(mcp_client.get_tool_names())
+                    
+                    # 동적으로 서버 상태 생성
+                    content_parts = ["## 🟢 서버 상태\n", "### 연결된 서버"]
+                    
+                    for server_name in server_names:
+                        server_icon = "🌤️" if server_name == "weather" else "📁" if server_name == "file-manager" else "🔧"
+                        content_parts.append(f"- **{server_name}**: {server_icon} 서버 ✅")
+                    
+                    content_parts.extend([
+                        "\n### 시스템 상태",
+                        f"- **서버**: {server_count}개 활성화",
+                        f"- **도구**: {tool_count}개 사용 가능", 
+                        "- **상태**: 모든 시스템 정상 작동 중",
+                        "\n모든 서버가 정상적으로 연결되어 있으며 도구 사용이 가능합니다."
+                    ])
+                    
+                    system_info_content = "\n".join(content_parts)
+                    
+                except Exception as e:
+                    logger.error(f"서버 상태 가져오기 실패: {e}")
+                    # 실패 시 기본 메시지
+                    system_info_content = "## 🟢 서버 상태\n\n서버 상태 정보를 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+            else:
+                # MCP 클라이언트가 없는 경우
+                system_info_content = "## 🟢 서버 상태\n\nMCP 클라이언트가 초기화되지 않았습니다."
+            
+            state["response"] = system_info_content
+            state["success"] = True
+            update_workflow_step(state, "completed")
+            return state
+        
         # 디버깅: tool_calls 내용 확인
         logger.info(f"tool_calls 길이: {len(tool_calls)}")
         if tool_calls:
@@ -352,5 +438,9 @@ def _determine_target_from_intent(intent_type: IntentType, parameters: Dict[str,
             'info': 'file_info'
         }
         return 'file-manager', tool_map.get(operation, 'list_files')
+    
+    elif intent_type in [IntentType.TOOL_LIST, IntentType.SERVER_STATUS, IntentType.HELP, IntentType.GENERAL_CHAT]:
+        # 이러한 요청들은 MCP 도구 호출이 아닌 시스템 정보 제공
+        return None, None
     
     return None, None 

@@ -154,6 +154,43 @@ class EnhancedMCPClient:
         """서버 이름 목록 반환"""
         return list(self._server_config.keys())
     
+    def get_tools_info(self) -> Dict[str, List[Dict[str, str]]]:
+        """서버별 도구 정보를 구조화하여 반환
+        
+        Returns:
+            서버별 도구 정보 딕셔너리
+            예: {"weather": [{"name": "get_weather", "description": "..."}]}
+        """
+        tools_by_server = {}
+        
+        # 각 서버의 도구들을 분류
+        for server_name in self._server_config.keys():
+            tools_by_server[server_name] = []
+        
+        # 도구들을 서버별로 분류
+        for tool in self._tools:
+            tool_name = getattr(tool, 'name', '이름없음')
+            tool_desc = getattr(tool, 'description', '설명없음')
+            
+            # 도구 이름이나 설명에서 서버 추정 (임시 방법)
+            assigned_server = None
+            if 'weather' in tool_name.lower() or 'forecast' in tool_name.lower():
+                assigned_server = 'weather'
+            elif 'file' in tool_name.lower() or 'list' in tool_name.lower() or 'read' in tool_name.lower():
+                assigned_server = 'file-manager'
+            
+            # 기본적으로 첫 번째 서버에 할당 (더 나은 방법 필요)
+            if assigned_server is None and self._server_config:
+                assigned_server = list(self._server_config.keys())[0]
+            
+            if assigned_server and assigned_server in tools_by_server:
+                tools_by_server[assigned_server].append({
+                    'name': tool_name,
+                    'description': tool_desc
+                })
+        
+        return tools_by_server
+    
     async def __aenter__(self):
         """비동기 컨텍스트 매니저 진입"""
         return self

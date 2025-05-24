@@ -419,19 +419,19 @@
                 <p style="margin: 10px 0;">langchain-mcp-adapters와 LangGraph를 활용한 대화형 MCP 호스트 시스템입니다.</p>
                 
                 <div class="command-examples">
-                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                    <div class="command-example" onclick="insertCommand('서울 날씨 알려줘')">
                         🌤️ 서울 날씨 알려줘
                     </div>
-                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                    <div class="command-example" onclick="insertCommand('부산 3일 예보')">
                         📅 부산 3일 예보
                     </div>
-                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                    <div class="command-example" onclick="insertCommand('파일 목록 보여줘')">
                         📁 파일 목록 보여줘
                     </div>
-                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                    <div class="command-example" onclick="insertCommand('도움말')">
                         ❓ 도움말
                     </div>
-                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                    <div class="command-example" onclick="insertCommand('도구 목록')">
                         🔧 도구 목록
                     </div>
                 </div>
@@ -468,6 +468,9 @@
         const serverCount = document.getElementById('serverCount');
         const toolCount = document.getElementById('toolCount');
         let typingIndicator = null;
+        let isSending = false; // 중복 전송 방지 플래그
+        let isComposing = false; // IME 조합 상태 추적
+        let pendingEnter = false; // Enter 키 대기 상태
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -480,6 +483,12 @@
             
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
+                console.log('WebSocket 응답 수신:', data);
+                
+                // 응답 수신 시 전송 플래그 해제
+                isSending = false;
+                sendButton.disabled = false;
+                
                 hideTypingIndicator();
                 addAssistantMessage(data);
             };
@@ -553,21 +562,23 @@
             messageDiv.className = 'message assistant';
             
             let content = data.response || '';
+            let toolCallsHtml = '';
             
-            // 도구 호출 정보 추가
+            // 도구 호출 정보는 별도 HTML로 생성
             if (data.tool_calls && data.tool_calls.length > 0) {
-                const toolCallsHtml = data.tool_calls.map(tool => `
+                toolCallsHtml = data.tool_calls.map(tool => `
                     <div class="tool-call">
                         🔧 ${tool.server}.${tool.tool}(${JSON.stringify(tool.arguments)})
                         ${tool.success ? '✅' : '❌'} ${tool.execution_time_ms}ms
                     </div>
                 `).join('');
-                content = toolCallsHtml + content;
             }
             
+            // 메시지 구성: 도구 호출 HTML + 응답 마크다운
             messageDiv.innerHTML = `
                 <div class="message-avatar">🤖</div>
                 <div class="message-content">
+                    ${toolCallsHtml}
                     ${renderMarkdown(content)}
                     <div class="message-time">${new Date().toLocaleTimeString()}</div>
                 </div>
@@ -612,39 +623,68 @@
         }
 
         function insertCommand(command) {
-            // 이모지와 따옴표를 모두 제거하고 깔끔하게 처리
-            let cleanCommand = command.trim();
+            // 전달받은 명령어를 그대로 사용
+            console.log('삽입할 명령어:', command);
             
-            // 모든 이모지 제거 (유니코드 이모지 범위)
-            cleanCommand = cleanCommand.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '');
-            
-            // 남은 공백 정리
-            cleanCommand = cleanCommand.trim();
-            
-            // 따옴표로 감싸진 경우 따옴표 제거
-            if (cleanCommand.startsWith('"') && cleanCommand.endsWith('"')) {
-                cleanCommand = cleanCommand.slice(1, -1);
-            }
-            
-            messageInput.value = cleanCommand;
+            messageInput.value = command;
             messageInput.focus();
         }
 
+        function forceClearInput() {
+            // 강제로 입력창 완전 클리어
+            console.log('강제 입력창 클리어 시작');
+            
+            messageInput.value = '';
+            messageInput.blur();
+            
+            // 모든 상태 초기화
+            isComposing = false;
+            pendingEnter = false;
+            
+            // DOM 조작으로 확실히 클리어
+            setTimeout(() => {
+                messageInput.value = '';
+                messageInput.focus();
+                console.log('강제 클리어 완료');
+            }, 20);
+        }
+
         function sendMessage() {
+            console.log('sendMessage 호출됨, isSending:', isSending);
+            
+            // 이미 전송 중이면 무시
+            if (isSending) {
+                console.log('이미 전송 중이므로 무시');
+                return;
+            }
+            
             const message = messageInput.value.trim();
+            console.log('전송할 메시지:', message);
+            
             if (message && ws && ws.readyState === WebSocket.OPEN) {
+                isSending = true; // 전송 시작
+                
                 addUserMessage(message);
                 showTypingIndicator();
                 
+                console.log('WebSocket으로 메시지 전송');
                 ws.send(JSON.stringify({
                     message: message,
                     session_id: 'web_' + Date.now()
                 }));
                 
-                messageInput.value = '';
+                // 강제 입력창 클리어 사용
+                forceClearInput();
+                
                 autoResize();
                 sendButton.disabled = true;
-                setTimeout(() => sendButton.disabled = false, 1000);
+                
+                // 1초 후 전송 플래그 해제
+                setTimeout(() => {
+                    isSending = false;
+                    sendButton.disabled = false;
+                    console.log('전송 플래그 해제');
+                }, 1000);
             }
         }
 
@@ -657,7 +697,54 @@
         messageInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
+                
+                // IME 조합 중이면 대기 상태로 설정
+                if (isComposing) {
+                    console.log('IME 조합 중이므로 Enter 대기');
+                    pendingEnter = true;
+                    return;
+                }
+                
+                console.log('Enter 키로 sendMessage 호출');
                 sendMessage();
+            }
+        });
+
+        // keyup에서도 Enter 확인 (IME 처리 보완)
+        messageInput.addEventListener('keyup', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+                if (pendingEnter) {
+                    pendingEnter = false;
+                    console.log('지연된 Enter 처리');
+                    setTimeout(() => {
+                        if (messageInput.value.trim()) {
+                            sendMessage();
+                        }
+                    }, 10);
+                }
+            }
+        });
+
+        // IME 조합 시작
+        messageInput.addEventListener('compositionstart', function(e) {
+            isComposing = true;
+            console.log('IME 조합 시작');
+        });
+
+        // IME 조합 종료
+        messageInput.addEventListener('compositionend', function(e) {
+            isComposing = false;
+            console.log('IME 조합 종료, 입력값:', e.target.value);
+            
+            // 조합 종료 후 대기 중인 Enter가 있다면 처리
+            if (pendingEnter) {
+                pendingEnter = false;
+                setTimeout(() => {
+                    console.log('조합 종료 후 지연된 Enter 처리');
+                    if (messageInput.value.trim()) {
+                        sendMessage();
+                    }
+                }, 50);
             }
         });
 
