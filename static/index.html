@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LangGraph MCP 호스트</title>
+    <!-- Favicon 설정 - 404 에러 방지 -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>��</text></svg>">
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+    <script>
+        // marked.js 백업 로드
+        if (typeof marked === 'undefined') {
+            console.log('Primary CDN failed, loading backup...');
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/marked@11.1.1/marked.min.js';
+            document.head.appendChild(script);
+        }
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+            min-height: 600px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .status-bar {
+            padding: 12px 25px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .connected .status-dot { background: #28a745; }
+        .disconnected .status-dot { background: #dc3545; }
+        .initializing .status-dot { background: #ffc107; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin: 15px 0;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .user .message-avatar {
+            background: #007bff;
+            color: white;
+        }
+
+        .assistant .message-avatar {
+            background: #6c757d;
+            color: white;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 15px 20px;
+            border-radius: 18px;
+            position: relative;
+        }
+
+        .user .message-content {
+            background: #007bff;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .assistant .message-content {
+            background: white;
+            color: #333;
+            border: 1px solid #e9ecef;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 0.75rem;
+            opacity: 0.7;
+            margin-top: 5px;
+        }
+
+        .tool-call {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 10px 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        #messageInput {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #e9ecef;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+            resize: none;
+            min-height: 50px;
+            max-height: 120px;
+            line-height: 1.4;
+        }
+
+        #messageInput:focus {
+            border-color: #007bff;
+        }
+
+        #sendButton {
+            padding: 12px 24px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+            height: 50px;
+        }
+
+        #sendButton:hover:not(:disabled) {
+            background: #0056b3;
+        }
+
+        #sendButton:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .help-text {
+            color: #6c757d;
+            font-size: 0.8rem;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .typing-indicator {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 15px 20px;
+            background: white;
+            border-radius: 18px;
+            border: 1px solid #e9ecef;
+            max-width: 200px;
+            margin: 15px 0;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dots span {
+            width: 8px;
+            height: 8px;
+            background: #6c757d;
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-10px); }
+        }
+
+        .welcome-message {
+            background: #e8f5e8;
+            border-left: 4px solid #28a745;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+        }
+
+        .command-examples {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .command-example {
+            background: rgba(255,255,255,0.8);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .command-example:hover {
+            background: rgba(255,255,255,1);
+        }
+
+        /* 마크다운 스타일 */
+        .message-content h1, .message-content h2, .message-content h3, 
+        .message-content h4, .message-content h5, .message-content h6 {
+            margin: 12px 0 8px 0;
+            font-weight: bold;
+        }
+
+        .message-content h1 { font-size: 1.4rem; }
+        .message-content h2 { font-size: 1.2rem; }
+        .message-content h3 { font-size: 1.1rem; }
+
+        .message-content p {
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+
+        .message-content ul, .message-content ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .message-content li {
+            margin: 4px 0;
+            line-height: 1.4;
+        }
+
+        .message-content code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #e83e8c;
+        }
+
+        .message-content pre {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 12px;
+            margin: 8px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .message-content pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        .message-content blockquote {
+            border-left: 4px solid #007bff;
+            padding-left: 12px;
+            margin: 8px 0;
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .message-content strong {
+            font-weight: bold;
+        }
+
+        .message-content em {
+            font-style: italic;
+        }
+
+        .message-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+        }
+
+        .message-content th, .message-content td {
+            border: 1px solid #dee2e6;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .message-content th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                height: 100vh;
+                border-radius: 0;
+            }
+            
+            .message-content {
+                max-width: 85%;
+            }
+            
+            body {
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 LangGraph MCP 호스트</h1>
+            <p>langchain-mcp-adapters + LangGraph 워크플로우</p>
+        </div>
+        
+        <div class="status-bar">
+            <div id="connectionStatus" class="status disconnected">
+                <div class="status-dot"></div>
+                <span>연결 대기중...</span>
+            </div>
+            <div id="serverInfo">
+                <span id="serverCount">서버: 0개</span> | 
+                <span id="toolCount">도구: 0개</span>
+            </div>
+        </div>
+        
+        <div id="chatContainer" class="chat-container">
+            <div class="welcome-message">
+                <strong>🎉 MCP 호스트에 오신 것을 환영합니다!</strong>
+                <p style="margin: 10px 0;">langchain-mcp-adapters와 LangGraph를 활용한 대화형 MCP 호스트 시스템입니다.</p>
+                
+                <div class="command-examples">
+                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                        🌤️ 서울 날씨 알려줘
+                    </div>
+                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                        📅 부산 3일 예보
+                    </div>
+                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                        📁 파일 목록 보여줘
+                    </div>
+                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                        ❓ 도움말
+                    </div>
+                    <div class="command-example" onclick="insertCommand(this.textContent)">
+                        🔧 도구 목록
+                    </div>
+                </div>
+                
+                <p style="margin-top: 15px; color: #666; font-size: 0.9rem;">
+                    명령어를 클릭하거나 직접 입력해보세요!
+                </p>
+            </div>
+        </div>
+        
+        <div class="input-container">
+            <div class="input-group">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="메시지를 입력하세요..." 
+                        rows="1"
+                    ></textarea>
+                </div>
+                <button id="sendButton" onclick="sendMessage()">전송</button>
+            </div>
+            <div class="help-text">
+                Enter로 전송, Shift+Enter로 줄바꿈
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        const chatContainer = document.getElementById('chatContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const serverCount = document.getElementById('serverCount');
+        const toolCount = document.getElementById('toolCount');
+        let typingIndicator = null;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            
+            ws.onopen = function() {
+                updateConnectionStatus('connected', '🟢 연결됨');
+                loadSystemInfo();
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                hideTypingIndicator();
+                addAssistantMessage(data);
+            };
+            
+            ws.onclose = function() {
+                updateConnectionStatus('disconnected', '🔴 연결 끊김');
+                setTimeout(connect, 3000); // 재연결 시도
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket 오류:', error);
+                updateConnectionStatus('disconnected', '🔴 연결 오류');
+            };
+        }
+
+        function updateConnectionStatus(status, text) {
+            connectionStatus.className = `status ${status}`;
+            connectionStatus.querySelector('span').textContent = text;
+        }
+
+        async function loadSystemInfo() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                if (data.status === 'healthy') {
+                    serverCount.textContent = `서버: ${data.connected_servers.length}개`;
+                    toolCount.textContent = `도구: ${data.available_tools_count}개`;
+                }
+            } catch (error) {
+                console.error('시스템 정보 로드 오류:', error);
+            }
+        }
+
+        function addUserMessage(content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user';
+            messageDiv.innerHTML = `
+                <div class="message-avatar">👤</div>
+                <div class="message-content">
+                    ${escapeHtml(content)}
+                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+            `;
+            chatContainer.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderMarkdown(text) {
+            try {
+                console.log('마크다운 입력:', text);
+                // marked.js를 사용하여 마크다운을 HTML로 변환
+                const rendered = marked.parse(text);
+                console.log('마크다운 출력:', rendered);
+                return rendered;
+            } catch (error) {
+                console.error('마크다운 렌더링 오류:', error);
+                // 실패시 기본 텍스트로 대체 (줄바꿈만 처리)
+                return text.replace(/\n/g, '<br>');
+            }
+        }
+
+        function addAssistantMessage(data) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            
+            let content = data.response || '';
+            
+            // 도구 호출 정보 추가
+            if (data.tool_calls && data.tool_calls.length > 0) {
+                const toolCallsHtml = data.tool_calls.map(tool => `
+                    <div class="tool-call">
+                        🔧 ${tool.server}.${tool.tool}(${JSON.stringify(tool.arguments)})
+                        ${tool.success ? '✅' : '❌'} ${tool.execution_time_ms}ms
+                    </div>
+                `).join('');
+                content = toolCallsHtml + content;
+            }
+            
+            messageDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    ${renderMarkdown(content)}
+                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+            `;
+            
+            chatContainer.appendChild(messageDiv);
+            scrollToBottom();
+        }
+
+        function showTypingIndicator() {
+            // 이미 표시 중이면 무시
+            if (typingIndicator) return;
+            
+            typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.style.display = 'flex';
+            typingIndicator.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div>
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #6c757d;">입력 중...</div>
+                </div>
+            `;
+            
+            chatContainer.appendChild(typingIndicator);
+            scrollToBottom();
+        }
+
+        function hideTypingIndicator() {
+            if (typingIndicator) {
+                typingIndicator.remove();
+                typingIndicator = null;
+            }
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function insertCommand(command) {
+            // 이모지와 따옴표를 모두 제거하고 깔끔하게 처리
+            let cleanCommand = command.trim();
+            
+            // 모든 이모지 제거 (유니코드 이모지 범위)
+            cleanCommand = cleanCommand.replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '');
+            
+            // 남은 공백 정리
+            cleanCommand = cleanCommand.trim();
+            
+            // 따옴표로 감싸진 경우 따옴표 제거
+            if (cleanCommand.startsWith('"') && cleanCommand.endsWith('"')) {
+                cleanCommand = cleanCommand.slice(1, -1);
+            }
+            
+            messageInput.value = cleanCommand;
+            messageInput.focus();
+        }
+
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && ws && ws.readyState === WebSocket.OPEN) {
+                addUserMessage(message);
+                showTypingIndicator();
+                
+                ws.send(JSON.stringify({
+                    message: message,
+                    session_id: 'web_' + Date.now()
+                }));
+                
+                messageInput.value = '';
+                autoResize();
+                sendButton.disabled = true;
+                setTimeout(() => sendButton.disabled = false, 1000);
+            }
+        }
+
+        function autoResize() {
+            messageInput.style.height = 'auto';
+            messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+        }
+
+        // 이벤트 리스너
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        messageInput.addEventListener('input', autoResize);
+
+        // 초기 연결
+        connect();
+
+        // marked.js 로드 확인
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('marked.js 사용 가능:', typeof marked !== 'undefined');
+            if (typeof marked !== 'undefined') {
+                console.log('marked 버전:', marked.VERSION || 'unknown');
+            }
+        });
+    </script>
+</body>
+</html> 

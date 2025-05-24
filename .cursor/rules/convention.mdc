@@ -1,0 +1,315 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# MCP 호스트 Python 개발 컨벤션
+
+## **일반 Python 개발 규칙**
+- 숙련된 시니어 Python 개발자로서 행동합니다.
+- SOLID 원칙, DRY 원칙, KISS 원칙, YAGNI 원칙을 항상 준수합니다.
+- MCP 표준 및 모범 사례를 항상 따릅니다.
+- 모든 작업을 최소 단위로 분해하고 단계별 접근 방식으로 문제를 해결합니다.
+- 타입 힌트를 필수로 사용하고 Pydantic 모델을 활용합니다.
+
+## **Pydantic 모델 컨벤션**
+
+- 모든 데이터 모델은 BaseModel을 상속받아야 합니다.
+- 필드 검증을 위해 validator 및 Field를 적극 활용합니다.
+- 명확한 docstring과 함께 모델을 문서화합니다.
+
+```python
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List
+from datetime import datetime
+
+class WorkflowRequest(BaseModel):
+    """워크플로우 실행 요청 모델"""
+    
+    workflow_id: str = Field(..., description="워크플로우 식별자", min_length=1)
+    input_data: dict = Field(default_factory=dict, description="입력 데이터")
+    server_config: ServerConfig = Field(..., description="MCP 서버 설정")
+    timeout: Optional[int] = Field(default=300, ge=1, le=3600, description="타임아웃(초)")
+    
+    @validator('workflow_id')
+    def validate_workflow_id(cls, v):
+        if not v.isalnum():
+            raise ValueError('워크플로우 ID는 영숫자만 포함해야 합니다')
+        return v
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+```
+
+## **MCP 서비스 클래스 컨벤션**
+
+- 모든 서비스는 ABC를 상속한 인터페이스를 먼저 정의합니다.
+- 구현체는 Interface + "Impl" 네이밍을 따릅니다.
+- 의존성 주입은 생성자를 통해서만 수행합니다.
+- 모든 I/O 작업은 async/await를 사용합니다.
+
+```python
+from abc import ABC, abstractmethod
+from typing import Protocol
+
+class WorkflowService(Protocol):
+    """워크플로우 서비스 인터페이스"""
+    
+    async def execute_workflow(self, request: WorkflowRequest) -> WorkflowResult:
+        """워크플로우 실행"""
+        ...
+
+class WorkflowServiceImpl:
+    """워크플로우 서비스 구현체"""
+    
+    def __init__(
+        self,
+        mcp_adapter: MCPAdapter,
+        state_manager: StateManager,
+        validator: WorkflowValidator
+    ):
+        self._mcp_adapter = mcp_adapter
+        self._state_manager = state_manager
+        self._validator = validator
+    
+    async def execute_workflow(self, request: WorkflowRequest) -> WorkflowResult:
+        """워크플로우 실행 구현"""
+        # 검증
+        await self._validator.validate(request)
+        
+        # 실행
+        result = await self._execute_internal(request)
+        return result
+```
+
+## **MCP 어댑터 클래스 컨벤션**
+
+- MCP SDK 기능을 추상화하는 어댑터 패턴을 사용합니다.
+- 각 전송 방식(stdio, SSE, HTTP)별로 별도 어댑터를 구현합니다.
+- 세션 생명주기 관리를 컨텍스트 매니저로 처리합니다.
+- 에러 처리 및 재시도 로직을 포함합니다.
+
+```python
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+from mcp import ClientSession
+
+class MCPAdapter(Protocol):
+    """MCP 어댑터 인터페이스"""
+    
+    async def create_session(self, config: ServerConfig) -> ClientSession:
+        """세션 생성"""
+        ...
+    
+    async def close_session(self, session: ClientSession) -> None:
+        """세션 종료"""
+        ...
+
+class StdioMCPAdapter:
+    """stdio 전송 방식 MCP 어댑터"""
+    
+    @asynccontextmanager
+    async def session_scope(self, config: ServerConfig) -> AsyncGenerator[ClientSession, None]:
+        """세션 생명주기 관리"""
+        session = await self.create_session(config)
+        try:
+            yield session
+        finally:
+            await self.close_session(session)
+```
+
+## **FastAPI 라우터 컨벤션**
+
+- 라우터는 @router.get, @router.post 등의 데코레이터를 사용합니다.
+- 클래스 레벨 prefix를 @router로 지정합니다.
+- 모든 종속성은 Depends()를 사용하여 주입합니다.
+- 반환 객체는 Pydantic 모델을 사용합니다.
+- 예외 처리는 HTTPException을 사용합니다.
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from mcp_host.dependencies import get_workflow_service
+
+router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+@router.post("/execute", response_model=WorkflowResponse)
+async def execute_workflow(
+    request: WorkflowRequest,
+    service: WorkflowService = Depends(get_workflow_service)
+) -> WorkflowResponse:
+    """워크플로우 실행 엔드포인트"""
+    try:
+        result = await service.execute_workflow(request)
+        return WorkflowResponse.from_result(result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="내부 서버 오류")
+```
+
+## **LangGraph 워크플로우 컨벤션**
+
+- StateGraph를 사용하여 워크플로우를 정의합니다.
+- 상태는 TypedDict를 사용하여 타입 안전성을 보장합니다.
+- 각 노드는 명확한 단일 책임을 가져야 합니다.
+- START와 END를 명시적으로 사용합니다.
+
+```python
+from langgraph import StateGraph, START, END
+from typing import TypedDict, Annotated
+
+class MCPWorkflowState(TypedDict):
+    """MCP 워크플로우 상태"""
+    session: Annotated[ClientSession, "MCP 세션"]
+    current_step: Annotated[str, "현재 단계"]
+    input_data: Annotated[dict, "입력 데이터"]
+    output_data: Annotated[dict, "출력 데이터"]
+
+class MCPWorkflowGraph:
+    """MCP 워크플로우 그래프"""
+    
+    def __init__(self):
+        self.graph = self._build_graph()
+    
+    def _build_graph(self) -> StateGraph:
+        """그래프 구성"""
+        workflow = StateGraph(MCPWorkflowState)
+        
+        workflow.add_node("validate_input", self._validate_input)
+        workflow.add_node("process_data", self._process_data)
+        workflow.add_node("finalize_output", self._finalize_output)
+        
+        workflow.add_edge(START, "validate_input")
+        workflow.add_edge("validate_input", "process_data")
+        workflow.add_edge("process_data", "finalize_output")
+        workflow.add_edge("finalize_output", END)
+        
+        return workflow.compile()
+```
+
+## **에러 처리 컨벤션**
+
+- 커스텀 예외 클래스를 정의하여 도메인별 에러를 구분합니다.
+- 로깅은 structlog를 사용하여 구조화된 로그를 작성합니다.
+- 재시도가 필요한 작업은 tenacity 라이브러리를 사용합니다.
+
+```python
+import structlog
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+logger = structlog.get_logger()
+
+class MCPHostError(Exception):
+    """MCP 호스트 기본 예외"""
+    pass
+
+class MCPConnectionError(MCPHostError):
+    """MCP 연결 오류"""
+    pass
+
+class MCPValidationError(MCPHostError):
+    """MCP 검증 오류"""
+    pass
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
+async def create_mcp_session(config: ServerConfig) -> ClientSession:
+    """재시도 로직이 포함된 MCP 세션 생성"""
+    try:
+        session = await mcp_client.create_session(config)
+        logger.info("MCP 세션 생성 성공", server=config.command)
+        return session
+    except Exception as e:
+        logger.error("MCP 세션 생성 실패", error=str(e), server=config.command)
+        raise MCPConnectionError(f"세션 생성 실패: {e}") from e
+```
+
+## **테스트 컨벤션**
+
+- pytest를 사용하여 모든 테스트를 작성합니다.
+- 비동기 테스트는 pytest-asyncio를 사용합니다.
+- Mock은 unittest.mock 또는 pytest-mock을 사용합니다.
+- 테스트 데이터는 Fixture를 사용하여 관리합니다.
+
+```python
+import pytest
+from unittest.mock import Mock, AsyncMock
+from mcp_host.services import WorkflowServiceImpl
+
+@pytest.fixture
+async def mock_mcp_adapter():
+    """MCP 어댑터 모킹"""
+    adapter = AsyncMock()
+    adapter.create_session.return_value = Mock()
+    return adapter
+
+@pytest.mark.asyncio
+async def test_execute_workflow_success(mock_mcp_adapter):
+    """워크플로우 실행 성공 테스트"""
+    # Given
+    service = WorkflowServiceImpl(mock_mcp_adapter, Mock(), Mock())
+    request = WorkflowRequest(
+        workflow_id="test_workflow",
+        input_data={"key": "value"},
+        server_config=ServerConfig(command="python", args=["server.py"])
+    )
+    
+    # When
+    result = await service.execute_workflow(request)
+    
+    # Then
+    assert result is not None
+    mock_mcp_adapter.create_session.assert_called_once()
+```
+
+## **프로젝트 구조 컨벤션**
+
+- 패키지는 도메인별로 구성합니다.
+- 각 패키지에는 __init__.py에서 public API를 명시합니다.
+- 설정은 pydantic Settings를 사용합니다.
+- 환경변수는 .env 파일을 통해 관리합니다.
+
+```
+mcp_host/
+├── __init__.py
+├── main.py                 # FastAPI 앱 진입점
+├── config.py              # 설정 관리
+├── dependencies.py        # DI 컨테이너
+├── protocols/             # MCP 프로토콜 관련
+├── adapters/             # 외부 시스템 어댑터
+├── services/             # 비즈니스 로직
+├── workflows/            # LangGraph 워크플로우
+├── schemas/              # Pydantic 모델
+└── exceptions.py         # 커스텀 예외
+```
+
+## **문서화 컨벤션**
+
+- 모든 공개 함수와 클래스에는 docstring을 작성합니다.
+- Google 스타일 docstring을 사용합니다.
+- FastAPI의 자동 문서화 기능을 활용합니다.
+
+```python
+async def execute_workflow(request: WorkflowRequest) -> WorkflowResult:
+    """워크플로우를 실행합니다.
+    
+    Args:
+        request: 워크플로우 실행 요청 정보
+        
+    Returns:
+        WorkflowResult: 실행 결과
+        
+    Raises:
+        MCPValidationError: 요청 검증 실패 시
+        MCPConnectionError: MCP 연결 실패 시
+        
+    Example:
+        >>> request = WorkflowRequest(workflow_id="test", ...)
+        >>> result = await execute_workflow(request)
+    """
+```
+

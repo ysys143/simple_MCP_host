@@ -1,0 +1,16 @@
+{
+  "weather": {
+    "command": "python",
+    "args": ["/Users/jaesolshin/MCP_test/examples/dummy_weather_server.py"],
+    "transport": "stdio"
+  },
+  "file-manager": {
+    "command": "python", 
+    "args": ["/Users/jaesolshin/MCP_test/examples/dummy_file_server.py"],
+    "transport": "stdio",
+    "env": {
+      "PYTHONPATH": "/Users/jaesolshin/MCP_test",
+      "SAFE_MODE": "true"
+    }
+  }
+} 

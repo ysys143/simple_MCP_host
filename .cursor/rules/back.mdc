@@ -1,0 +1,381 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# MCP 호스트 백엔드 설계 가이드라인
+
+이 문서는 LangGraph MCP 호스트 시스템 개발을 위한 핵심 설계 원칙과 패턴을 정의합니다.
+MCP Python SDK와 LangGraph 통합을 기반으로 합니다.
+
+# 기술 스택 및 기본 규칙
+
+## 기술 스택
+
+**프레임워크:** FastAPI + uvicorn, Python 3.11+
+**핵심 의존성:** MCP Python SDK, LangGraph, Pydantic, asyncio, httpx
+**핵심 원칙:** SOLID, DRY, KISS, YAGNI 원칙 준수 및 MCP 표준 준수
+
+## 아키텍처 계층 규칙
+
+**규칙:** 명확한 계층 분리 및 책임 할당
+
+**근거:**
+- 관심사 분리를 통한 유지보수성 향상
+- 테스트 독립성 보장
+- 코드 재사용성 극대화
+- MCP 표준 준수
+
+#### 계층별 책임 정의
+
+```python
+# 1. FastAPI Router: HTTP 요청/응답만 처리
+from fastapi import APIRouter, Depends, HTTPException
+from mcp_host.services import WorkflowService
+from mcp_host.schemas import WorkflowRequest, WorkflowResponse
+
+router = APIRouter(prefix="/api/workflows")
+
+@router.post("/execute", response_model=WorkflowResponse)
+async def execute_workflow(
+    request: WorkflowRequest,
+    workflow_service: WorkflowService = Depends()
+) -> WorkflowResponse:
+    """
+    워크플로우 실행 엔드포인트
+    - HTTP 요청/응답 처리만 담당
+    - 비즈니스 로직은 서비스 계층에 위임
+    """
+    try:
+        result = await workflow_service.execute_workflow(request)
+        return WorkflowResponse(
+            status="success",
+            data=result,
+            message="워크플로우가 성공적으로 실행되었습니다"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 2. Service Layer: 비즈니스 로직 구현, MCP 세션 관리
+from abc import ABC, abstractmethod
+from mcp import ClientSession
+from mcp_host.adapters import MCPAdapter
+
+class WorkflowService(ABC):
+    """워크플로우 서비스 인터페이스"""
+    
+    @abstractmethod
+    async def execute_workflow(self, request: WorkflowRequest) -> dict:
+        pass
+
+class WorkflowServiceImpl(WorkflowService):
+    """워크플로우 서비스 구현체"""
+    
+    def __init__(
+        self,
+        mcp_adapter: MCPAdapter,
+        state_manager: StateManager,
+        execution_engine: ExecutionEngine
+    ):
+        self.mcp_adapter = mcp_adapter
+        self.state_manager = state_manager
+        self.execution_engine = execution_engine
+    
+    async def execute_workflow(self, request: WorkflowRequest) -> dict:
+        """
+        워크플로우 실행 비즈니스 로직
+        - 입력 검증
+        - MCP 세션 관리
+        - LangGraph 실행
+        - 결과 처리
+        """
+        # 1. 입력 검증
+        await self._validate_request(request)
+        
+        # 2. MCP 세션 초기화
+        session = await self.mcp_adapter.create_session(request.server_config)
+        
+        try:
+            # 3. 워크플로우 상태 초기화
+            state = await self.state_manager.initialize_state(request)
+            
+            # 4. LangGraph 실행
+            result = await self.execution_engine.execute(state, session)
+            
+            # 5. 결과 처리 및 반환
+            return await self._process_result(result)
+            
+        finally:
+            # 6. 세션 정리
+            await self.mcp_adapter.close_session(session)
+```
+
+# 아키텍처 설계 원칙
+
+## SOLID 원칙 준수
+
+**규칙:** 모든 서비스 클래스는 SOLID 원칙을 엄격히 준수해야 함
+
+**근거:**
+- 유지보수성과 확장성 향상
+- 테스트 용이성 증대
+- 코드 재사용성 극대화
+
+#### 권장 패턴: 단일 책임 원칙 (SRP)
+
+```python
+# 올바른 예: 검증만 담당하는 서비스
+from pydantic import BaseModel, validator
+from typing import Dict, Any
+
+class MCPValidationService:
+    """
+    MCP 요청 검증만 담당
+    SRP: 검증 로직에만 단일 책임
+    """
+    
+    async def validate_server_config(self, config: ServerConfig) -> None:
+        """서버 설정 검증"""
+        await self._validate_required_fields(config)
+        await self._validate_connection_params(config)
+        await self._validate_security_settings(config)
+    
+    async def validate_workflow_request(self, request: WorkflowRequest) -> None:
+        """워크플로우 요청 검증"""
+        await self._validate_workflow_schema(request)
+        await self._validate_input_parameters(request)
+    
+    async def _validate_required_fields(self, config: ServerConfig) -> None:
+        """필수 필드 검증 로직"""
+        if not config.command:
+            raise ValueError("서버 명령어는 필수입니다")
+
+# 올바른 예: 워크플로우 오케스트레이션만 담당하는 서비스
+class WorkflowOrchestrationService:
+    """
+    워크플로우 전체 흐름 오케스트레이션만 담당
+    SRP: 비즈니스 플로우 조율에만 단일 책임
+    """
+    
+    def __init__(
+        self,
+        validation_service: MCPValidationService,
+        mcp_service: MCPSessionService,
+        execution_service: WorkflowExecutionService
+    ):
+        self.validation_service = validation_service
+        self.mcp_service = mcp_service
+        self.execution_service = execution_service
+    
+    async def execute_workflow(self, request: WorkflowRequest) -> WorkflowResult:
+        """
+        워크플로우 실행 전체 흐름 조율
+        SRP: 비즈니스 플로우 오케스트레이션에만 단일 책임
+        """
+        # 1. 검증 (검증 서비스에 위임)
+        await self.validation_service.validate_workflow_request(request)
+        
+        # 2. MCP 세션 관리 (MCP 서비스에 위임)
+        session = await self.mcp_service.create_session(request.server_config)
+        
+        try:
+            # 3. 워크플로우 실행 (실행 서비스에 위임)
+            result = await self.execution_service.execute(request, session)
+            return result
+            
+        finally:
+            # 4. 세션 정리
+            await self.mcp_service.close_session(session)
+```
+
+## MCP 표준 준수 패턴
+
+**규칙:** MCP 프로토콜 표준을 엄격히 준수
+
+**근거:**
+- 호환성 보장
+- 생태계 연동성
+- 표준 준수를 통한 안정성
+
+#### 권장 패턴: MCP 표준 인터페이스
+
+```python
+from mcp import types as mcp_types
+from abc import ABC, abstractmethod
+
+class MCPResourceProvider(ABC):
+    """MCP 리소스 제공자 인터페이스"""
+    
+    @abstractmethod
+    async def list_resources(self) -> list[mcp_types.Resource]:
+        """리소스 목록 반환 (MCP 표준)"""
+        pass
+    
+    @abstractmethod
+    async def read_resource(self, uri: str) -> tuple[str, str]:
+        """리소스 읽기 (content, mime_type 반환)"""
+        pass
+
+class FileSystemResourceProvider(MCPResourceProvider):
+    """파일 시스템 리소스 제공자"""
+    
+    async def list_resources(self) -> list[mcp_types.Resource]:
+        """파일 시스템 리소스 목록"""
+        return [
+            mcp_types.Resource(
+                uri=f"file://{path}",
+                name=path.name,
+                description=f"파일: {path}",
+                mimeType="text/plain"
+            )
+            for path in self._scan_files()
+        ]
+    
+    async def read_resource(self, uri: str) -> tuple[str, str]:
+        """파일 내용 읽기"""
+        if not uri.startswith("file://"):
+            raise ValueError("잘못된 파일 URI")
+        
+        file_path = uri[7:]  # "file://" 제거
+        async with aiofiles.open(file_path, 'r') as f:
+            content = await f.read()
+        
+        return content, "text/plain"
+```
+
+## LangGraph 통합 패턴
+
+**규칙:** StateGraph 기반 워크플로우 구현
+
+```python
+from langgraph import StateGraph, START, END
+from typing import TypedDict, Annotated, Sequence
+from langchain_core.messages import BaseMessage
+
+class WorkflowState(TypedDict):
+    """워크플로우 상태 정의"""
+    messages: Annotated[Sequence[BaseMessage], "메시지 시퀀스"]
+    mcp_session: Annotated[ClientSession, "MCP 세션"]
+    current_step: Annotated[str, "현재 실행 단계"]
+    resources: Annotated[dict, "MCP 리소스"]
+    tools_results: Annotated[dict, "도구 실행 결과"]
+
+class MCPWorkflowGraph:
+    """MCP 통합 워크플로우 그래프"""
+    
+    def __init__(self):
+        self.graph = self._build_graph()
+    
+    def _build_graph(self) -> StateGraph:
+        """워크플로우 그래프 구성"""
+        workflow = StateGraph(WorkflowState)
+        
+        # 노드 추가
+        workflow.add_node("initialize_mcp", self._initialize_mcp)
+        workflow.add_node("gather_resources", self._gather_resources)
+        workflow.add_node("execute_tools", self._execute_tools)
+        workflow.add_node("process_results", self._process_results)
+        
+        # 엣지 추가
+        workflow.add_edge(START, "initialize_mcp")
+        workflow.add_edge("initialize_mcp", "gather_resources")
+        workflow.add_edge("gather_resources", "execute_tools")
+        workflow.add_edge("execute_tools", "process_results")
+        workflow.add_edge("process_results", END)
+        
+        return workflow.compile()
+    
+    async def _initialize_mcp(self, state: WorkflowState) -> WorkflowState:
+        """MCP 세션 초기화 노드"""
+        # MCP 세션 초기화 로직
+        state["current_step"] = "mcp_initialized"
+        return state
+    
+    async def _gather_resources(self, state: WorkflowState) -> WorkflowState:
+        """리소스 수집 노드"""
+        session = state["mcp_session"]
+        resources = await session.list_resources()
+        state["resources"] = {r.uri: r for r in resources}
+        state["current_step"] = "resources_gathered"
+        return state
+```
+
+## 비동기 처리 및 에러 핸들링
+
+**규칙:** 모든 I/O 작업은 비동기로 처리하고 적절한 에러 핸들링 구현
+
+```python
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+class MCPSessionManager:
+    """MCP 세션 생명주기 관리"""
+    
+    @asynccontextmanager
+    async def session_scope(self, config: ServerConfig) -> AsyncGenerator[ClientSession, None]:
+        """
+        세션 생명주기 관리
+        - 자동 세션 생성/해제
+        - 에러 시 안전한 정리
+        """
+        session = None
+        try:
+            session = await self._create_session(config)
+            yield session
+        except Exception as e:
+            logging.error(f"MCP 세션 오류: {e}")
+            raise
+        finally:
+            if session:
+                await self._close_session_safely(session)
+    
+    async def _close_session_safely(self, session: ClientSession) -> None:
+        """안전한 세션 종료"""
+        try:
+            await asyncio.wait_for(session.close(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logging.warning("세션 종료 타임아웃")
+        except Exception as e:
+            logging.error(f"세션 종료 오류: {e}")
+```
+
+## 보안 및 성능 고려사항
+
+**규칙:** 입력 검증과 안전한 실행 환경 제공
+
+```python
+import subprocess
+import tempfile
+from pathlib import Path
+
+class SecureMCPExecutor:
+    """보안 강화 MCP 실행기"""
+    
+    async def execute_tool_safely(self, tool_name: str, args: dict) -> dict:
+        """도구 안전 실행"""
+        # 1. 입력 검증
+        self._validate_tool_name(tool_name)
+        self._validate_arguments(args)
+        
+        # 2. 샌드박스 환경에서 실행
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = await self._execute_in_sandbox(tool_name, args, temp_dir)
+        
+        return result
+    
+    def _validate_tool_name(self, tool_name: str) -> None:
+        """도구 이름 검증"""
+        if not tool_name.isalnum():
+            raise ValueError("도구 이름에 허용되지 않은 문자가 포함됨")
+    
+    def _validate_arguments(self, args: dict) -> None:
+        """인수 검증"""
+        for key, value in args.items():
+            if isinstance(value, str) and len(value) > 10000:
+                raise ValueError(f"인수 '{key}'가 너무 큽니다")
+```
+
+이 가이드라인은 MCP 호스트 시스템의 안정적이고 확장 가능한 백엔드 구현을 위한 핵심 원칙들을 제시합니다.
+
