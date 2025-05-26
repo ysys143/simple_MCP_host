@@ -294,7 +294,8 @@ class MCPWorkflowExecutor:
                                 tool_call.server_name,
                                 tool_call.tool_name,
                                 "completed" if tool_call.is_successful() else "failed",
-                                session_id
+                                session_id,
+                                tool_call.arguments
                             )
                             await sse_manager.send_to_session(session_id, tool_msg)
                             

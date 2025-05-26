@@ -357,14 +357,23 @@ function handleToolCall(data) {
         scrollToBottom();
     }
     
+    // 서버명과 도구명 정보
+    const server = data.metadata?.server || 'unknown';
+    const tool = data.metadata?.tool || 'unknown';
+    const arguments = data.metadata?.arguments || {};
+    
+    // 인수를 JSON 문자열로 변환
+    const argsJsonString = JSON.stringify(arguments, null, 0);
+    
     // 도구 호출 박스 추가
     const toolCallDiv = document.createElement('div');
     toolCallDiv.className = 'tool-call executing';
-    toolCallDiv.setAttribute('data-server', data.metadata?.server || 'unknown');
-    toolCallDiv.setAttribute('data-tool', data.metadata?.tool || 'unknown');
+    toolCallDiv.setAttribute('data-server', server);
+    toolCallDiv.setAttribute('data-tool', tool);
     
     toolCallDiv.innerHTML = `
-        🔧 ${data.metadata?.server || 'unknown'}.${data.metadata?.tool || 'unknown'}() 
+        🔧 서버명: ${server}, 도구명: ${tool}<br>
+        📋 파라미터: ${escapeHtml(argsJsonString)}
         <span class="tool-status">⏳ 실행 중...</span>
     `;
     
@@ -390,21 +399,46 @@ function handleToolResult(data) {
             executingToolCall.classList.add(success ? 'success' : 'failed');
             
             // 결과 내용 추출 (서버에서 "도구 실행 결과: " 접두사 제거)
-            const resultText = data.content.replace('도구 실행 결과: ', '');
+            let resultText = data.content.replace('도구 실행 결과: ', '');
             
-            // 도구 호출 박스 내용 업데이트 (한 줄로 표시)
-            executingToolCall.innerHTML = `
-                🔧 ${executingToolCall.getAttribute('data-server')}.${executingToolCall.getAttribute('data-tool')}() 
-                ${success ? '✅' : '❌'} ${escapeHtml(resultText)}
-            `;
+            // 결과를 JSON 형태로 포맷팅 시도
+            let formattedResult;
+            try {
+                // 이미 JSON 문자열인지 확인
+                const parsed = JSON.parse(resultText);
+                formattedResult = JSON.stringify(parsed, null, 0);
+            } catch (e) {
+                // JSON이 아니면 간단한 객체로 래핑
+                formattedResult = JSON.stringify({"result": resultText}, null, 0);
+            }
+            
+            // 기존 내용에서 "⏳ 실행 중..." 부분만 결과로 교체
+            const currentContent = executingToolCall.innerHTML;
+            const updatedContent = currentContent.replace(
+                '<span class="tool-status">⏳ 실행 중...</span>',
+                `<br>📤 결과: ${success ? '✅' : '❌'} ${escapeHtml(formattedResult)}`
+            );
+            
+            executingToolCall.innerHTML = updatedContent;
         } else {
             // 기존 박스를 찾지 못한 경우 새로 생성 (fallback)
             const resultElement = document.createElement('div');
             resultElement.className = `tool-call ${success ? 'success' : 'failed'}`;
             
-            const resultText = data.content.replace('도구 실행 결과: ', '');
+            let resultText = data.content.replace('도구 실행 결과: ', '');
+            
+            // 결과를 JSON 형태로 포맷팅
+            let formattedResult;
+            try {
+                const parsed = JSON.parse(resultText);
+                formattedResult = JSON.stringify(parsed, null, 0);
+            } catch (e) {
+                formattedResult = JSON.stringify({"result": resultText}, null, 0);
+            }
+            
             resultElement.innerHTML = `
-                🔧 ${toolName}() ${success ? '✅' : '❌'} ${escapeHtml(resultText)}
+                🔧 도구명: ${toolName}<br>
+                📤 결과: ${success ? '✅' : '❌'} ${escapeHtml(formattedResult)}
             `;
             
             currentToolCallsContainer.appendChild(resultElement);

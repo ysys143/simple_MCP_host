@@ -106,7 +106,7 @@ def create_observing_message(content: str, session_id: str, observation_data: Op
     )
 
 
-def create_tool_call_message(server: str, tool: str, status: str, session_id: str) -> StreamMessage:
+def create_tool_call_message(server: str, tool: str, status: str, session_id: str, arguments: Optional[Dict[str, Any]] = None) -> StreamMessage:
     """도구 호출 메시지 생성"""
     return StreamMessage(
         type=StreamMessageType.TOOL_CALL,
@@ -115,7 +115,8 @@ def create_tool_call_message(server: str, tool: str, status: str, session_id: st
         metadata={
             "server": server,
             "tool": tool,
-            "status": status
+            "status": status,
+            "arguments": arguments or {}
         }
     )
 
