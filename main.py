@@ -32,7 +32,7 @@ def main():
             host="0.0.0.0",
             port=8000,
             log_level="info",
-            reload=False,  # 프로덕션에서는 False
+            reload=True,  # 개발 중 자동 재시작 활성화
             access_log=True
         )
         

@@ -126,4 +126,15 @@ class ChatState(TypedDict, total=False):
     success: bool
     error: Optional[str]
     step_count: int
-    next_step: Optional[str] 
+    next_step: Optional[str]
+    
+    # ReAct 패턴 관련 필드
+    react_mode: bool  # ReAct 모드 활성화 여부
+    react_iteration: int  # 현재 ReAct 반복 횟수
+    react_max_iterations: int  # 최대 ReAct 반복 횟수 (기본값: 10)
+    react_current_step: Optional[str]  # 현재 ReAct 단계 (think/act/observe)
+    react_thought: Optional[str]  # 현재 생각 내용
+    react_action: Optional[str]  # 현재 행동 계획
+    react_observation: Optional[str]  # 현재 관찰 결과
+    react_final_answer: Optional[str]  # 최종 답변
+    react_should_continue: bool  # 계속 진행할지 여부 

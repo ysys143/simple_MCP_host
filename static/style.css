@@ -248,6 +248,48 @@ body {
     text-align: center;
 }
 
+.input-options {
+    display: flex;
+    justify-content: center;
+    margin-top: 10px;
+    margin-bottom: 5px;
+}
+
+.react-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 8px 12px;
+    border-radius: 20px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+}
+
+.react-toggle:hover {
+    background: #e9ecef;
+    border-color: #007bff;
+}
+
+.react-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #007bff;
+    cursor: pointer;
+}
+
+.react-toggle input[type="checkbox"]:checked + .toggle-text {
+    color: #007bff;
+    font-weight: 500;
+}
+
+.react-toggle .toggle-text {
+    color: #6c757d;
+    transition: color 0.3s ease;
+}
+
 .typing-indicator {
     display: none;
     align-items: center;
@@ -442,4 +484,130 @@ body {
     0% { transform: translateY(-50%) scale(1); opacity: 1; }
     50% { transform: translateY(-50%) scale(1.1); opacity: 0.7; }
     100% { transform: translateY(-50%) scale(1); opacity: 1; }
+}
+
+/* ReAct 컨테이너 스타일 */
+.react-container .message-content {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #6c757d;
+}
+
+.react-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.react-title {
+    font-weight: 600;
+    color: #495057;
+    font-size: 0.95em;
+}
+
+.react-time {
+    font-size: 0.75rem;
+    color: #6c757d;
+}
+
+.react-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.react-step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 0.8em;
+    line-height: 1.3;
+}
+
+.step-icon {
+    font-size: 1em;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.step-title {
+    font-weight: 500;
+    color: #495057;
+    flex-shrink: 0;
+    min-width: 50px;
+}
+
+.step-content {
+    color: #6c757d;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    word-break: break-word;
+}
+
+/* 단계별 색상 구분 (아이콘만) */
+.react-thinking .step-icon { color: #3b82f6; }
+.react-acting .step-icon { color: #f59e0b; }
+.react-observing .step-icon { color: #10b981; }
+
+/* 도구 호출 정보 스타일 */
+.tool-call-info {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+}
+
+.tool-icon {
+    font-size: 1.1em;
+}
+
+.tool-status.executing {
+    margin-left: auto;
+    color: #f59e0b;
+    font-size: 0.9em;
+}
+
+/* 도구 결과 정보 스타일 */
+.tool-result-info {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+}
+
+.tool-result-info.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    color: #065f46;
+}
+
+.tool-result-info.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #991b1b;
+}
+
+.result-icon {
+    font-size: 1.1em;
+}
+
+.result-text {
+    font-weight: 500;
+    color: #059669;
+}
+
+.error-text {
+    font-weight: 500;
+    color: #dc2626;
 } 

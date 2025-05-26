@@ -8,11 +8,9 @@ SOLID 원칙을 준수하여 실행기는 워크플로우 관리만 담당하고
 각 노드는 단일 책임을 갖도록 설계되었습니다.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-from langchain_core.messages import BaseMessage
 from langgraph.graph import StateGraph, END
 
 from ..models import ChatState
@@ -59,17 +57,21 @@ class MCPWorkflowExecutor:
     async def execute_message(
         self,
         user_message: str,
-        session_id: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
-        mcp_client = None
+        mcp_client: Optional[Any] = None,
+        react_mode: bool = False
     ) -> Dict[str, Any]:
         """사용자 메시지를 처리하고 워크플로우를 실행합니다
         
         Args:
             user_message: 사용자 입력 메시지
             session_id: 세션 식별자
+            user_id: 사용자 식별자
             context: 추가 컨텍스트 정보
             mcp_client: MCP 클라이언트 인스턴스
+            react_mode: 반응 모드 여부
             
         Returns:
             실행 결과를 포함한 딕셔너리
@@ -81,7 +83,8 @@ class MCPWorkflowExecutor:
             initial_state = create_initial_state(
                 user_message=user_message,
                 session_id=session_id,
-                mcp_client=mcp_client
+                mcp_client=mcp_client,
+                react_mode=react_mode
             )
             
             # 컨텍스트 정보 추가
@@ -133,9 +136,10 @@ class MCPWorkflowExecutor:
         self,
         user_message: str,
         session_id: str,
-        sse_manager = None,
+        sse_manager: Any,
         context: Optional[Dict[str, Any]] = None,
-        mcp_client = None
+        mcp_client: Optional[Any] = None,
+        react_mode: bool = False
     ) -> Dict[str, Any]:
         """SSE 스트리밍과 함께 사용자 메시지를 처리합니다
         
@@ -145,13 +149,14 @@ class MCPWorkflowExecutor:
             sse_manager: SSE 매니저 인스턴스
             context: 추가 컨텍스트 정보
             mcp_client: MCP 클라이언트 인스턴스
+            react_mode: 반응 모드 여부
             
         Returns:
             실행 결과를 포함한 딕셔너리
         """
         if not sse_manager:
             # SSE 매니저가 없으면 기본 실행
-            return await self.execute_message(user_message, session_id, context, mcp_client)
+            return await self.execute_message(user_message, session_id, context, mcp_client, react_mode)
         
         # SSE 스트리밍 import (순환 import 방지)
         from ..streaming import (
@@ -166,6 +171,58 @@ class MCPWorkflowExecutor:
         try:
             self._logger.info(f"스트리밍 워크플로우 실행 시작 - 세션: {session_id}")
             
+            # ReAct 모드인 경우 graph.py의 워크플로우 사용
+            if react_mode:
+                self._logger.info("ReAct 모드 - graph.py 워크플로우 실행")
+                
+                # graph.py의 워크플로우 import
+                from .graph import create_workflow
+                
+                # ReAct 워크플로우 생성
+                react_workflow = create_workflow()
+                
+                # 초기 상태 구성
+                initial_state = create_initial_state(
+                    user_message=user_message,
+                    session_id=session_id,
+                    mcp_client=mcp_client,
+                    react_mode=react_mode
+                )
+                
+                # 컨텍스트 정보 추가
+                if context:
+                    initial_state["context"].update(context)
+                
+                # ReAct 워크플로우 실행
+                result = await react_workflow.ainvoke(initial_state)
+                
+                # 결과 정리
+                parsed_intent = result.get("parsed_intent")
+                intent_type_value = None
+                if parsed_intent and hasattr(parsed_intent, "intent_type"):
+                    intent_type_value = parsed_intent.intent_type.value if hasattr(parsed_intent.intent_type, "value") else str(parsed_intent.intent_type)
+                
+                response_data = {
+                    "success": result.get("success", True),
+                    "response": result.get("response", result.get("react_final_answer", "ReAct 처리 완료")),
+                    "intent_type": intent_type_value,
+                    "tool_calls": [
+                        {
+                            "server": call.server_name,
+                            "tool": call.tool_name,
+                            "arguments": call.arguments,
+                            "result": call.result,
+                            "success": call.is_successful(),
+                            "execution_time_ms": call.execution_time_ms
+                        } for call in result.get("tool_calls", [])
+                    ],
+                    "session_id": session_id
+                }
+                
+                self._logger.info(f"ReAct 워크플로우 실행 완료 - 성공: {response_data['success']}")
+                return response_data
+            
+            # 일반 모드 - 기존 방식 유지
             # 1단계: 의도 분석 시작
             thinking_msg = create_thinking_message(
                 f"'{user_message}' 요청을 분석하고 있습니다...",
@@ -178,7 +235,8 @@ class MCPWorkflowExecutor:
             initial_state = create_initial_state(
                 user_message=user_message,
                 session_id=session_id,
-                mcp_client=mcp_client
+                mcp_client=mcp_client,
+                react_mode=react_mode
             )
             
             # 컨텍스트 정보 추가

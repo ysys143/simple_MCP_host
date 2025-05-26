@@ -12,6 +12,9 @@ from langgraph.graph.graph import CompiledGraph
 
 from .state import ChatState, create_initial_state
 from .nodes import parse_message, call_mcp_tool, generate_response
+from .react_nodes import (
+    react_think_node, react_act_node, react_observe_node, react_finalize_node
+)
 
 
 def should_call_mcp_tool(state: ChatState) -> str:
@@ -23,12 +26,41 @@ def should_call_mcp_tool(state: ChatState) -> str:
     Returns:
         다음 노드 이름
     """
+    # ReAct 모드인 경우 ReAct 워크플로우로 라우팅
+    if state.get("react_mode", False):
+        return "react_think"
+    
     parsed_intent = state.get("parsed_intent")
     
     if parsed_intent and parsed_intent.is_mcp_action():
         return "call_mcp_tool"
     else:
         return "generate_response"
+
+
+def should_continue_react(state: ChatState) -> str:
+    """ReAct 워크플로우 계속 여부를 결정하는 조건부 엣지
+    
+    Args:
+        state: 현재 워크플로우 상태
+        
+    Returns:
+        다음 노드 이름
+    """
+    next_step = state.get("next_step")
+    
+    if next_step == "react_think":
+        return "react_think"
+    elif next_step == "react_act":
+        return "react_act"
+    elif next_step == "react_observe":
+        return "react_observe"
+    elif next_step == "react_finalize":
+        return "react_finalize"
+    elif next_step == "error_handler":
+        return "generate_response"  # 에러 시 일반 응답으로
+    else:
+        return END
 
 
 def should_continue(state: ChatState) -> str:
@@ -55,6 +87,8 @@ def create_workflow() -> CompiledGraph:
     워크플로우 구조:
     START → parse_message → [조건부] → call_mcp_tool → generate_response → END
                           ↘ → generate_response → END
+                          ↘ → react_think → react_act → react_observe → [조건부] → react_finalize → END
+                                                                      ↘ → react_think (반복)
     
     Returns:
         컴파일된 LangGraph 워크플로우
@@ -64,35 +98,74 @@ def create_workflow() -> CompiledGraph:
     # StateGraph 생성
     workflow = StateGraph(ChatState)
     
-    # 노드 추가
+    # 기존 노드 추가
     workflow.add_node("parse_message", parse_message)
     workflow.add_node("call_mcp_tool", call_mcp_tool)
     workflow.add_node("generate_response", generate_response)
+    
+    # ReAct 노드 추가
+    workflow.add_node("react_think", react_think_node)
+    workflow.add_node("react_act", react_act_node)
+    workflow.add_node("react_observe", react_observe_node)
+    workflow.add_node("react_finalize", react_finalize_node)
     
     # 시작점 설정
     workflow.set_entry_point("parse_message")
     
     # 엣지 연결
-    # parse_message → 조건부 분기
+    # parse_message → 조건부 분기 (일반 워크플로우 vs ReAct 워크플로우)
     workflow.add_conditional_edges(
         "parse_message",
         should_call_mcp_tool,
         {
             "call_mcp_tool": "call_mcp_tool",
-            "generate_response": "generate_response"
+            "generate_response": "generate_response",
+            "react_think": "react_think"
         }
     )
     
-    # call_mcp_tool → generate_response
+    # 기존 워크플로우 엣지
     workflow.add_edge("call_mcp_tool", "generate_response")
-    
-    # generate_response → END
     workflow.add_edge("generate_response", END)
+    
+    # ReAct 워크플로우 엣지
+    workflow.add_conditional_edges(
+        "react_think",
+        should_continue_react,
+        {
+            "react_act": "react_act",
+            "react_finalize": "react_finalize",
+            "generate_response": "generate_response",
+            END: END
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "react_act",
+        should_continue_react,
+        {
+            "react_observe": "react_observe",
+            "react_finalize": "react_finalize",
+            END: END
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "react_observe",
+        should_continue_react,
+        {
+            "react_think": "react_think",
+            "react_finalize": "react_finalize",
+            END: END
+        }
+    )
+    
+    workflow.add_edge("react_finalize", END)
     
     # 워크플로우 컴파일
     compiled_workflow = workflow.compile()
     
-    logger.info("LangGraph 워크플로우 생성 완료")
+    logger.info("LangGraph 워크플로우 생성 완료 (ReAct 지원)")
     return compiled_workflow
 
 

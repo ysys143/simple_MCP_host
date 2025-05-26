@@ -15,6 +15,9 @@ let isComposing = false;
 let sessionId = null;
 let currentPartialMessage = null; // 스트리밍 메시지 추적
 let currentToolCallsContainer = null; // 도구 호출 컨테이너 추적
+let currentReActContainer = null; // ReAct 과정 컨테이너 추적
+let currentRequestReActMode = false; // 현재 요청의 ReAct 모드 상태 추적
+let timeoutId = null; // 타임아웃 ID 저장
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
@@ -165,10 +168,12 @@ function connect() {
                     // 도구 호출 시작 처리
                     handleToolCall(data);
                 } else if (data.type === 'thinking' || data.type === 'acting' || data.type === 'observing') {
-                    // 진행 상태 메시지는 무시하거나 로그만
-                    console.log('진행 상태:', data.type, data.content);
+                    // ReAct 모드일 때만 ReAct 단계별 메시지를 UI에 표시
+                    if (currentRequestReActMode) {
+                        handleReActStep(data);
+                    }
                     
-                    // observing 메시지 중 도구 결과인 경우 처리
+                    // observing 메시지 중 도구 결과인 경우 처리 (ReAct 모드와 관계없이)
                     if (data.type === 'observing' && data.metadata && data.metadata.observation_data && data.metadata.observation_data.tool) {
                         handleToolResult(data);
                     }
@@ -200,7 +205,61 @@ function connect() {
 }
 
 function handlePartialResponse(data) {
+    // ReAct 최종 답변 스트리밍인 경우
+    if (data.metadata && data.metadata.react_final) {
+        if (!currentPartialMessage) {
+            // ReAct 컨테이너 종료 (더 이상 단계 추가 안함)
+            currentReActContainer = null;
+            
+            // 새로운 스트리밍 메시지 시작
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant streaming';
+            messageDiv.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-content">
+                    <div class="streaming-content"></div>
+                    <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+            `;
+            
+            chatContainer.appendChild(messageDiv);
+            currentPartialMessage = messageDiv;
+            scrollToBottom();
+        }
+        
+        // 스트리밍 내용 업데이트
+        const contentDiv = currentPartialMessage.querySelector('.streaming-content');
+        if (contentDiv) {
+            contentDiv.innerHTML = renderMarkdown(data.content || '');
+            scrollToBottom();
+        }
+        return;
+    }
+    
+    // 일반 스트리밍 처리
     if (!currentPartialMessage) {
+        // 기존 도구 호출 컨테이너가 있으면 재사용
+        if (currentToolCallsContainer) {
+            // 기존 도구 호출 메시지에 응답 내용 추가
+            const parentMessage = currentToolCallsContainer.closest('.message');
+            if (parentMessage) {
+                // 스트리밍 컨텐츠 영역 추가
+                const streamingDiv = document.createElement('div');
+                streamingDiv.className = 'streaming-content';
+                streamingDiv.innerHTML = renderMarkdown(data.content || '');
+                
+                // 도구 호출 컨테이너 다음에 응답 추가
+                currentToolCallsContainer.insertAdjacentElement('afterend', streamingDiv);
+                
+                // 현재 부분 메시지로 설정 (스트리밍 계속을 위해)
+                currentPartialMessage = parentMessage;
+                parentMessage.classList.add('streaming');
+                
+                scrollToBottom();
+                return;
+            }
+        }
+        
         // 새로운 스트리밍 메시지 시작
         hideTypingIndicator(); // 타이핑 인디케이터 숨김
         
@@ -241,10 +300,38 @@ function handleFinalResponse(data) {
         }
         currentPartialMessage = null;
     } else {
+        // 기존 도구 호출 컨테이너가 있으면 재사용
+        if (currentToolCallsContainer) {
+            const parentMessage = currentToolCallsContainer.closest('.message');
+            if (parentMessage) {
+                // 최종 응답 내용 추가
+                const responseDiv = document.createElement('div');
+                responseDiv.innerHTML = renderMarkdown(data.content || '');
+                
+                // 도구 호출 컨테이너 다음에 응답 추가
+                currentToolCallsContainer.insertAdjacentElement('afterend', responseDiv);
+                
+                // 도구 호출 컨테이너 초기화
+                currentToolCallsContainer = null;
+                
+                scrollToBottom();
+                return;
+            }
+        }
+        
         // 새로운 최종 응답 메시지 (스트리밍 없이)
         hideTypingIndicator();
         addAssistantMessage({ response: data.content });
     }
+    
+    // ReAct 최종 답변인 경우 ReAct 컨테이너 종료
+    if (data.metadata && data.metadata.react_final) {
+        currentReActContainer = null;
+    }
+    
+    // 도구 호출 컨테이너 초기화
+    currentToolCallsContainer = null;
+    
     scrollToBottom();
 }
 
@@ -286,32 +373,41 @@ function handleToolCall(data) {
 }
 
 function handleToolResult(data) {
-    // 해당 도구 호출 박스 업데이트
+    console.log('도구 결과 처리:', data);
+    
     if (currentToolCallsContainer) {
-        const toolName = data.metadata.observation_data.tool;
-        const success = data.metadata.observation_data.success;
-        const result = data.content;
+        // 서버에서 보내는 데이터 구조에 맞게 수정
+        const observationData = data.metadata.observation_data;
+        const toolName = observationData.tool;
+        const success = observationData.success;
         
-        // 해당 도구의 박스 찾기
-        const toolBoxes = currentToolCallsContainer.querySelectorAll('.tool-call');
-        const targetBox = Array.from(toolBoxes).find(box => 
-            box.getAttribute('data-tool') === toolName && box.classList.contains('executing')
-        );
+        // 기존 도구 호출 박스 찾기 (가장 최근에 추가된 executing 상태의 박스)
+        const executingToolCall = currentToolCallsContainer.querySelector('.tool-call.executing');
         
-        if (targetBox) {
-            targetBox.classList.remove('executing');
-            targetBox.classList.add(success ? 'success' : 'failed');
+        if (executingToolCall) {
+            // 실행 중 상태를 완료 상태로 변경
+            executingToolCall.classList.remove('executing');
+            executingToolCall.classList.add(success ? 'success' : 'failed');
             
-            const statusSpan = targetBox.querySelector('.tool-status');
-            if (statusSpan) {
-                statusSpan.innerHTML = success ? 'Succeed' : 'Failed';
-            }
+            // 결과 내용 추출 (서버에서 "도구 실행 결과: " 접두사 제거)
+            const resultText = data.content.replace('도구 실행 결과: ', '');
             
-            // 결과 내용 추가
-            const resultDiv = document.createElement('div');
-            resultDiv.className = 'tool-result';
-            resultDiv.textContent = result;
-            targetBox.appendChild(resultDiv);
+            // 도구 호출 박스 내용 업데이트 (한 줄로 표시)
+            executingToolCall.innerHTML = `
+                🔧 ${executingToolCall.getAttribute('data-server')}.${executingToolCall.getAttribute('data-tool')}() 
+                ${success ? '✅' : '❌'} ${escapeHtml(resultText)}
+            `;
+        } else {
+            // 기존 박스를 찾지 못한 경우 새로 생성 (fallback)
+            const resultElement = document.createElement('div');
+            resultElement.className = `tool-call ${success ? 'success' : 'failed'}`;
+            
+            const resultText = data.content.replace('도구 실행 결과: ', '');
+            resultElement.innerHTML = `
+                🔧 ${toolName}() ${success ? '✅' : '❌'} ${escapeHtml(resultText)}
+            `;
+            
+            currentToolCallsContainer.appendChild(resultElement);
         }
         
         scrollToBottom();
@@ -475,6 +571,15 @@ function resetSendingState() {
     sendButton.disabled = false;
     sendButton.textContent = '전송';
     hideTypingIndicator();
+    
+    // ReAct 모드 상태 초기화
+    currentRequestReActMode = false;
+    
+    // 타임아웃 취소
+    if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+    }
 }
 
 function sendMessage() {
@@ -502,6 +607,14 @@ function sendMessage() {
         return;
     }
     
+    // ReAct 모드 체크
+    const reactModeToggle = document.getElementById('reactModeToggle');
+    const reactMode = reactModeToggle ? reactModeToggle.checked : false;
+    console.log('ReAct 모드:', reactMode);
+    
+    // 현재 요청의 ReAct 모드 상태 저장
+    currentRequestReActMode = reactMode;
+    
     // 전송 시작
     isSending = true;
     sendButton.disabled = true;
@@ -509,6 +622,9 @@ function sendMessage() {
     
     addUserMessage(message);
     showTypingIndicator();
+    
+    // ReAct 컨테이너 초기화 (새로운 요청 시작)
+    currentReActContainer = null;
     
     // 강제 입력창 클리어
     forceClearInput();
@@ -522,7 +638,8 @@ function sendMessage() {
         },
         body: JSON.stringify({
             message: message,
-            session_id: sessionId
+            session_id: sessionId,
+            react_mode: reactMode  // ReAct 모드 포함
         })
     })
     .then(response => response.json())
@@ -544,7 +661,7 @@ function sendMessage() {
     });
     
     // 타임아웃 안전장치 (20초로 단축)
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
         if (isSending) {
             console.log('타임아웃으로 전송 상태 재설정');
             resetSendingState();
@@ -564,4 +681,110 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof marked !== 'undefined') {
         console.log('marked 버전:', marked.VERSION || 'unknown');
     }
-}); 
+});
+
+// ReAct 단계별 메시지 처리
+function handleReActStep(data) {
+    console.log('ReAct 단계 처리:', data.type, data.content);
+    
+    // ReAct 컨테이너가 없으면 새로 생성
+    if (!currentReActContainer) {
+        hideTypingIndicator(); // 타이핑 인디케이터 숨기기
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant react-container';
+        messageDiv.innerHTML = `
+            <div class="message-avatar">🤖</div>
+            <div class="message-content">
+                <div class="react-header">
+                    <span class="react-title">🧠 ReAct 사고 과정</span>
+                    <span class="react-time">${new Date().toLocaleTimeString()}</span>
+                </div>
+                <div class="react-steps"></div>
+            </div>
+        `;
+        
+        chatContainer.appendChild(messageDiv);
+        currentReActContainer = messageDiv.querySelector('.react-steps');
+        scrollToBottom();
+    }
+    
+    let stepIcon = '';
+    let stepClass = '';
+    let stepTitle = '';
+    
+    switch (data.type) {
+        case 'thinking':
+            stepIcon = '🤔';
+            stepClass = 'react-thinking';
+            stepTitle = '사고';
+            break;
+        case 'acting':
+            stepIcon = '⚡';
+            stepClass = 'react-acting';
+            stepTitle = '행동';
+            break;
+        case 'observing':
+            stepIcon = '👁️';
+            stepClass = 'react-observing';
+            stepTitle = '관찰';
+            break;
+    }
+    
+    const iteration = data.metadata?.iteration || '';
+    const iterationText = iteration ? ` ${iteration}` : '';
+    
+    // acting 단계에서 도구 호출 정보 추출
+    let toolCallInfo = '';
+    if (data.type === 'acting' && data.content) {
+        const toolMatch = data.content.match(/행동 실행 중:\s*(.+)/);
+        if (toolMatch) {
+            const actionText = toolMatch[1];
+            const toolPattern = /(\w+):\s*(.+)/;
+            const toolMatchResult = actionText.match(toolPattern);
+            
+            if (toolMatchResult) {
+                const toolName = toolMatchResult[1];
+                const toolArgs = toolMatchResult[2];
+                toolCallInfo = ` → 🔧 ${toolName}(${escapeHtml(toolArgs)})`;
+            }
+        }
+    }
+    
+    // observing 단계에서 도구 결과 정보 추출
+    let toolResultInfo = '';
+    if (data.type === 'observing' && data.content) {
+        const successMatch = data.content.match(/도구 '(\w+)' 실행 성공:\s*(.+)/);
+        const failMatch = data.content.match(/도구 '(\w+)' 실행 실패:\s*(.+)/);
+        
+        if (successMatch) {
+            const result = successMatch[2];
+            toolResultInfo = ` → ✅ ${escapeHtml(result)}`;
+        } else if (failMatch) {
+            const error = failMatch[2];
+            toolResultInfo = ` → ❌ ${escapeHtml(error)}`;
+        }
+    }
+    
+    // 단계 요소 생성
+    const stepDiv = document.createElement('div');
+    stepDiv.className = `react-step-item ${stepClass}`;
+    
+    // 사고 과정의 경우 내용을 간략하게 표시
+    let displayContent = data.content;
+    if (data.type === 'thinking' && data.content.includes('사고:')) {
+        const thoughtMatch = data.content.match(/사고:\s*(.+)/);
+        if (thoughtMatch) {
+            displayContent = thoughtMatch[1].substring(0, 100) + (thoughtMatch[1].length > 100 ? '...' : '');
+        }
+    }
+    
+    stepDiv.innerHTML = `
+        <span class="step-icon">${stepIcon}</span>
+        <span class="step-title">${stepTitle}${iterationText}:</span>
+        <span class="step-content">${escapeHtml(displayContent)}${toolCallInfo}${toolResultInfo}</span>
+    `;
+    
+    currentReActContainer.appendChild(stepDiv);
+    scrollToBottom();
+} 

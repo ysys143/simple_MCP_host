@@ -39,6 +39,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+    react_mode: bool = False  # ReAct 모드 활성화 여부
 
 
 class ChatResponse(BaseModel):
@@ -441,7 +442,8 @@ def create_app() -> FastAPI:
                     session_id=request.session_id,
                     sse_manager=sse_manager,
                     context=context,
-                    mcp_client=_app_instance.mcp_client
+                    mcp_client=_app_instance.mcp_client,
+                    react_mode=request.react_mode  # ReAct 모드 전달
                 )
                 
                 logger.info(f"워크플로우 처리 완료 - 성공: {result.get('success')}")

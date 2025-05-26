@@ -20,7 +20,8 @@ def create_initial_state(
     user_message: str,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
-    mcp_client: Optional[Any] = None
+    mcp_client: Optional[Any] = None,
+    react_mode: bool = False
 ) -> ChatState:
     """초기 채팅 상태를 생성합니다 (세션 히스토리 포함)
     
@@ -29,6 +30,7 @@ def create_initial_state(
         session_id: 세션 ID (선택적)
         user_id: 사용자 ID (선택적)
         mcp_client: Enhanced MCP Client 인스턴스 (선택적)
+        react_mode: ReAct 모드 활성화 여부 (선택적)
     
     Returns:
         초기화된 ChatState (기존 대화 히스토리 포함)
@@ -99,8 +101,24 @@ def create_initial_state(
         "next_step": None,
         "session_id": session_id,
         "context": {},
-        "mcp_client": mcp_client
+        "mcp_client": mcp_client,
+        
+        # ReAct 패턴 관련 필드 초기화
+        "react_mode": react_mode,
+        "react_iteration": 0,
+        "react_max_iterations": 10,
+        "react_current_step": None,
+        "react_thought": None,
+        "react_action": None,
+        "react_observation": None,
+        "react_final_answer": None,
+        "react_should_continue": True
     }
+    
+    # ReAct 모드인 경우 첫 번째 단계 설정
+    if react_mode:
+        state["next_step"] = "react_think"
+        logger.info("ReAct 모드로 초기화됨")
     
     return state
 
