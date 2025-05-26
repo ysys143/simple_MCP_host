@@ -121,6 +121,8 @@ body {
     padding: 15px 20px;
     border-radius: 18px;
     position: relative;
+    font-size: 0.9rem;
+    line-height: 1.5;
 }
 
 .user .message-content {
@@ -354,17 +356,18 @@ body {
 /* 마크다운 스타일 */
 .message-content h1, .message-content h2, .message-content h3, 
 .message-content h4, .message-content h5, .message-content h6 {
-    margin: 12px 0 8px 0;
-    font-weight: bold;
+    margin: 10px 0 8px 0;
+    font-weight: 600;
 }
 
-.message-content h1 { font-size: 1.4rem; }
-.message-content h2 { font-size: 1.2rem; }
-.message-content h3 { font-size: 1.1rem; }
+.message-content h1 { font-size: 1.2rem; }
+.message-content h2 { font-size: 1.1rem; }
+.message-content h3 { font-size: 1.0rem; }
 
 .message-content p {
     margin: 8px 0;
     line-height: 1.5;
+    font-size: 0.9rem;
 }
 
 .message-content ul, .message-content ol {
@@ -438,55 +441,46 @@ body {
 
 @media (max-width: 768px) {
     .container {
-        height: 100vh;
-        border-radius: 0;
+        height: 95vh;
+        min-height: 0;
     }
-    
     .message-content {
         max-width: 85%;
     }
-    
     body {
-        padding: 0;
+        padding: 5px;
     }
 }
 
-/* 스트리밍 메시지 스타일 */
-.message.streaming .message-content {
-    background: #f8fff9;
-    border-left: 3px solid #28a745;
-    position: relative;
-}
+/* 스트리밍 중인 메시지 강조 제거 */
+/* .message.streaming .message-content { */
+/*    animation: streaming-pulse 1.5s infinite ease-in-out; */
+/* } */
 
 .message.streaming .streaming-content {
-    min-height: 20px;
+    /* 추가적인 스트리밍 컨텐츠 스타일링이 필요하다면 여기에 작성 */
 }
 
-.message.streaming::after {
-    content: "💬";
-    position: absolute;
-    right: -10px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: #28a745;
-    color: white;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    animation: pulse 1.5s infinite;
-}
+/* 스트리밍 중인 메시지의 아바타에 적용되었던 점멸 효과 제거 */
+/* .message.streaming .message-avatar::after { */
+/*    content: ''; */
+/*    position: absolute; */
+/*    top: -2px; right: -2px; bottom: -2px; left: -2px; */
+/*    border-radius: 50%; */
+/*    border: 2px solid rgba(102, 126, 234, 0.5); */
+/*    animation: streaming-pulse-avatar 1.5s infinite ease-in-out; */
+/* } */
 
-@keyframes streaming-pulse {
-    0% { transform: translateY(-50%) scale(1); opacity: 1; }
-    50% { transform: translateY(-50%) scale(1.1); opacity: 0.7; }
-    100% { transform: translateY(-50%) scale(1); opacity: 1; }
-}
+/* @keyframes streaming-pulse { */
+/*    0%, 100% { box-shadow: 0 0 8px 2px rgba(102, 126, 234, 0.3); } */
+/*    50% { box-shadow: 0 0 12px 4px rgba(102, 126, 234, 0.6); } */
+/* } */
 
-/* ReAct 컨테이너 스타일 */
+/* @keyframes streaming-pulse-avatar { */
+/*    0%, 100% { border-color: rgba(102, 126, 234, 0.3); } */
+/*    50% { border-color: rgba(102, 126, 234, 0.7); } */
+/* } */
+
 .react-container .message-content {
     background: #f8f9fa;
     border: 1px solid #e9ecef;

@@ -511,10 +511,10 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 
 
 async def llm_generate_response_with_streaming(state: ChatState, sse_manager, session_id: str) -> ChatState:
-    """토큰 단위 스트리밍과 함께 LLM 응답 생성 (멀티턴 대화 지원)"""
+    """토큰 단위 스트리밍과 함께 LLM 응답 생성 (최적화된 버전)"""
     try:
         increment_step_count(state)
-        logger.info("LLM 스트리밍 응답 생성 시작 (멀티턴 대화 포함)")
+        logger.info("LLM 스트리밍 응답 생성 시작 (최적화된 버전)")
         
         user_input = state.get("current_message", BaseMessage(content="", type="human")).content
         tool_calls = state.get("tool_calls", [])
@@ -529,9 +529,9 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
             logger.info("시스템 정보 응답으로 기존 방식 사용")
             return llm_generate_response(state)  # 시스템 정보는 기존 방식 사용
         
-        logger.info("스트리밍 응답 생성 진행")
+        logger.info("최적화된 스트리밍 응답 생성 진행")
         
-        # 일반 LLM 사용 (스트리밍 없이)
+        # LLM 사용
         llm = get_llm()
         
         # 응답 생성 프롬프트 구성 (대화 히스토리 포함)
@@ -591,77 +591,92 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         
         logger.info(f"LLM에 전달할 메시지 수: {len(messages)} (시스템: 1, 히스토리: {len(conversation_history)-1}, 현재: 1)")
         
-        logger.info("LLM 응답 생성 중...")
-        # 먼저 전체 응답 생성
-        response = await llm.ainvoke(messages)
-        generated_response = response.content
+        # 실시간 스트리밍 응답 생성 (단어 단위 방식)
+        logger.info("단어 단위 스트리밍 시작...")
         
-        logger.info(f"LLM 응답 생성 완료, 길이: {len(generated_response)}")
-        logger.info(f"응답 일부: {generated_response[:100]}...")
+        full_response = ""
+        word_buffer = ""  # 단어 버퍼로 변경
+        token_count = 0
         
-        # 문자 단위 스트리밍으로 변경 (최소 단위)
-        current_text = ""
-        char_count = 0
-        
-        logger.info(f"문자 단위 스트리밍 시작, 총 {len(generated_response)}글자")
-        
-        for i, char in enumerate(generated_response):
-            current_text += char
-            char_count += 1
-            
-            # 1-2 글자마다 또는 구두점마다 partial_response 전송 (최소 단위)
-            should_send = (
-                char_count % 1 == 0 or  # 거의 모든 글자마다 (실시간 효과 극대화)
-                char in [' ', '\n', '.', ',', '!', '?', ';', ':', '-', ')', ']', '}'] or  # 구두점이나 공백
-                i == len(generated_response) - 1  # 마지막 글자
-            )
-            
-            if should_send:
-                # 10글자마다만 로깅 (로그 과부하 방지)
-                if i % 10 == 0 or i == len(generated_response) - 1:
-                    logger.info(f"partial_response 전송 중... ({i+1}/{len(generated_response)})")
+        try:
+            # LLM 스트리밍 호출
+            async for chunk in llm.astream(messages):
+                if hasattr(chunk, 'content') and chunk.content:
+                    token = chunk.content
+                    full_response += token
+                    word_buffer += token
+                    token_count += 1
                     
+                    # 단어 단위 버퍼링 전략 (자연스러운 방식)
+                    should_send = (
+                        token in [' ', '\t'] or  # 공백이나 탭 (단어 구분자)
+                        token in ['.', '!', '?', ',', ';', ':', '\n'] or  # 구두점이나 줄바꿈
+                        token in ['。', '！', '？', '，', '；', '：'] or  # 한국어/중국어 구두점
+                        len(word_buffer) >= 15 or  # 너무 긴 단어 방지 (15글자 제한)
+                        token_count % 20 == 0  # 안전장치: 20토큰마다 강제 전송
+                    )
+                    
+                    if should_send and word_buffer.strip():  # 공백만 있는 버퍼는 전송하지 않음
+                        # 완전한 단어 전송
+                        from ..streaming import create_partial_response_message
+                        partial_msg = create_partial_response_message(word_buffer, session_id)
+                        partial_msg.metadata = {"word_streaming": True, "cumulative": False}
+                        
+                        try:
+                            await sse_manager.send_to_session(session_id, partial_msg)
+                            logger.debug(f"단어 전송: '{word_buffer.strip()}' ({len(word_buffer)}글자)")
+                        except Exception as e:
+                            logger.error(f"단어 전송 실패: {e}")
+                        
+                        # 버퍼 초기화
+                        word_buffer = ""
+                        
+                        # 자연스러운 읽기 지연
+                        if token in ['.', '!', '?', '。', '！', '？']:
+                            await asyncio.sleep(0.15)  # 문장 끝 지연
+                        elif token in [',', ';', '，', '；']:
+                            await asyncio.sleep(0.08)  # 쉼표 지연
+                        elif token == '\n':
+                            await asyncio.sleep(0.1)   # 줄바꿈 지연
+                        else:
+                            await asyncio.sleep(0.05)  # 일반 단어 지연
+            
+            # 마지막 남은 단어 전송
+            if word_buffer.strip():
                 from ..streaming import create_partial_response_message
-                partial_msg = create_partial_response_message(current_text.strip(), session_id)
-                
-                try:
-                    await sse_manager.send_to_session(session_id, partial_msg)
-                    # 성공 로그도 간소화
-                    if i % 20 == 0 or i == len(generated_response) - 1:
-                        logger.info(f"partial_response 전송 성공: {len(current_text.strip())} 글자")
-                except Exception as e:
-                    logger.error(f"partial_response 전송 실패: {e}")
-                
-                # 실시간 타이핑 효과를 위한 아주 짧은 지연
-                if char in [' ', '\n']:
-                    await asyncio.sleep(0.02)  # 공백/줄바꿈 시 짧은 지연
-                elif char in ['.', '!', '?']:
-                    await asyncio.sleep(0.1)   # 문장 끝 시 약간 긴 지연
-                else:
-                    await asyncio.sleep(0.01)  # 일반 글자는 극도로 짧은 지연
+                partial_msg = create_partial_response_message(word_buffer, session_id)
+                partial_msg.metadata = {"word_streaming": True, "cumulative": False, "final_word": True}
+                await sse_manager.send_to_session(session_id, partial_msg)
+                logger.debug(f"마지막 단어 전송: '{word_buffer.strip()}'")
+            
+        except Exception as e:
+            logger.error(f"스트리밍 중 오류: {e}")
+            # 오류 시 전체 응답을 한 번에 생성
+            response = await llm.ainvoke(messages)
+            full_response = response.content
         
-        logger.info("모든 partial_response 전송 완료")
+        logger.info(f"단어 단위 스트리밍 완료 - 총 길이: {len(full_response)}글자, 토큰 수: {token_count}")
         
         # 최종 응답으로 상태 업데이트
-        state["response"] = generated_response
+        state["response"] = full_response
         state["success"] = True
         update_workflow_step(state, "completed")
         
         # 응답을 세션에 저장 (중요!)
         from .state import add_assistant_message
-        add_assistant_message(state, generated_response)
+        add_assistant_message(state, full_response)
         
-        # 최종 응답 메시지 전송
+        # 최종 응답 메시지 전송 (전체 텍스트)
         logger.info("final_response 전송 중...")
         from ..streaming import create_final_response_message
-        final_msg = create_final_response_message(generated_response, session_id)
+        final_msg = create_final_response_message(full_response, session_id)
         try:
             await sse_manager.send_to_session(session_id, final_msg)
             logger.info("final_response 전송 성공")
         except Exception as e:
             logger.error(f"final_response 전송 실패: {e}")
         
-        logger.info("LLM 스트리밍 응답 생성 완료")
+        logger.info("최적화된 LLM 스트리밍 응답 생성 완료")
         return state
         
     except Exception as e:

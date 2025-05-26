@@ -11,6 +11,7 @@ import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import time
+import asyncio
 
 from ..models import ChatState, ChatMessage, MessageRole, MCPToolCall
 from ..streaming.message_types import (
@@ -259,65 +260,115 @@ async def react_finalize_node(state: ChatState) -> ChatState:
         llm = get_llm()
         context = _build_llm_context_with_history(state, final_prompt)
         
-        # 스트리밍 응답 생성
+        # 토큰 단위 스트리밍 응답 생성
         final_answer = ""
+        word_buffer = ""  # 단어 버퍼로 변경
+        token_count = 0
+        
         if session_id:
             sse_manager = get_sse_manager()
             
-            # 스트리밍 시작 알림
-            start_msg = create_partial_response_message("", session_id)
-            start_msg.metadata = {"streaming": True, "react_final": True}
-            await sse_manager.send_to_session(session_id, start_msg)
+            logger.info("ReAct 최종 답변 단어 단위 스트리밍 시작")
             
-            # LLM 스트리밍 호출
-            async for chunk in llm.astream(context["messages"]):
-                if hasattr(chunk, 'content') and chunk.content:
-                    final_answer += chunk.content
-                    
-                    # 각 청크를 SSE로 전송
-                    chunk_msg = create_partial_response_message(final_answer, session_id)
-                    chunk_msg.metadata = {"streaming": True, "react_final": True}
+            try:
+                # LLM 스트리밍 호출
+                async for chunk in llm.astream(context["messages"]):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        token = chunk.content
+                        final_answer += token
+                        word_buffer += token
+                        token_count += 1
+                        
+                        # 단어 단위 버퍼링 전략 (자연스러운 방식)
+                        should_send = (
+                            token in [' ', '\t'] or  # 공백이나 탭 (단어 구분자)
+                            token in ['.', '!', '?', ',', ';', ':', '\n'] or  # 구두점이나 줄바꿈
+                            token in ['。', '！', '？', '，', '；', '：'] or  # 한국어/중국어 구두점
+                            len(word_buffer) >= 15 or  # 너무 긴 단어 방지 (15글자 제한)
+                            token_count % 20 == 0  # 안전장치: 20토큰마다 강제 전송
+                        )
+                        
+                        if should_send and word_buffer.strip():  # 공백만 있는 버퍼는 전송하지 않음
+                            # 완전한 단어 전송
+                            chunk_msg = create_partial_response_message(word_buffer, session_id)
+                            chunk_msg.metadata = {
+                                "streaming": True, 
+                                "react_final": True,
+                                "word_streaming": True,
+                                "cumulative": False
+                            }
+                            await sse_manager.send_to_session(session_id, chunk_msg)
+                            logger.debug(f"ReAct 단어 전송: '{word_buffer.strip()}' ({len(word_buffer)}글자)")
+                            
+                            # 버퍼 초기화
+                            word_buffer = ""
+                            
+                            # 자연스러운 읽기 지연
+                            if token in ['.', '!', '?', '。', '！', '？']:
+                                await asyncio.sleep(0.15)  # 문장 끝 지연
+                            elif token in [',', ';', '，', '；']:
+                                await asyncio.sleep(0.08)  # 쉼표 지연
+                            elif token == '\n':
+                                await asyncio.sleep(0.1)   # 줄바꿈 지연
+                            else:
+                                await asyncio.sleep(0.05)  # 일반 단어 지연
+                
+                # 마지막 남은 단어 전송
+                if word_buffer.strip():
+                    chunk_msg = create_partial_response_message(word_buffer, session_id)
+                    chunk_msg.metadata = {
+                        "streaming": True, 
+                        "react_final": True,
+                        "word_streaming": True,
+                        "cumulative": False,
+                        "final_word": True
+                    }
                     await sse_manager.send_to_session(session_id, chunk_msg)
+                    logger.debug(f"ReAct 마지막 단어 전송: '{word_buffer.strip()}'")
+                
+            except Exception as e:
+                logger.error(f"ReAct 스트리밍 중 오류: {e}")
+                # 오류 시 전체 응답을 한 번에 생성
+                response = await llm.ainvoke(context["messages"])
+                final_answer = response.content
+            
+            logger.info(f"ReAct 단어 단위 스트리밍 완료 - 총 길이: {len(final_answer)}글자, 토큰 수: {token_count}")
             
             # 스트리밍 완료 알림
             final_msg = create_final_response_message(final_answer, session_id)
             final_msg.metadata = {"react_final": True}
             await sse_manager.send_to_session(session_id, final_msg)
         else:
-            # 세션 ID가 없는 경우 일반 호출
+            # 세션 ID가 없으면 일반 방식으로 생성
             response = await llm.ainvoke(context["messages"])
-            final_answer = response.content.strip()
+            final_answer = response.content
         
-        # 최종 답변을 상태에 설정
+        # 상태 업데이트
+        state["react_final_answer"] = final_answer
         state["response"] = final_answer
         state["success"] = True
-        state["react_mode"] = False  # ReAct 모드 종료
         
-        # 최종 답변을 메시지로 추가
+        # 세션에 최종 답변 저장
         from .state import add_assistant_message
-        add_assistant_message(state, final_answer, metadata={"react_final": True})
+        add_assistant_message(state, final_answer)
         
         logger.info("ReAct 최종화 완료")
+        return state
         
     except Exception as e:
         logger.error(f"ReAct 최종화 오류: {e}")
+        import traceback
+        logger.error(f"스택 트레이스: {traceback.format_exc()}")
         
-        # 오류 발생 시 기본 답변 생성
-        final_answer = _generate_summary_answer(state)
-        state["response"] = final_answer
+        # 오류 시 간단한 요약 답변 생성
+        summary_answer = _generate_summary_answer(state)
+        state["react_final_answer"] = summary_answer
+        state["response"] = summary_answer
         state["success"] = True
-        state["react_mode"] = False
         
-        from .state import add_assistant_message
-        add_assistant_message(state, final_answer, metadata={"react_final": True})
+        add_assistant_message(state, summary_answer)
         
-        if session_id:
-            sse_manager = get_sse_manager()
-            final_msg = create_final_response_message(final_answer, session_id)
-            final_msg.metadata = {"react_final": True}
-            await sse_manager.send_to_session(session_id, final_msg)
-    
-    return state
+        return state
 
 
 def _build_think_prompt(state: ChatState) -> str:

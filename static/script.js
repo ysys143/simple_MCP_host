@@ -208,15 +208,15 @@ function handlePartialResponse(data) {
     // ReAct 최종 답변 스트리밍인 경우
     if (data.metadata && data.metadata.react_final) {
         if (!currentPartialMessage) {
-            // ReAct 컨테이너 종료 (더 이상 단계 추가 안함)
-            currentReActContainer = null;
+            // 새로운 ReAct 최종 답변 메시지 시작
+            hideTypingIndicator();
             
-            // 새로운 스트리밍 메시지 시작
             const messageDiv = document.createElement('div');
-            messageDiv.className = 'message assistant streaming';
+            messageDiv.className = 'message assistant streaming react-final';
             messageDiv.innerHTML = `
                 <div class="message-avatar">🤖</div>
                 <div class="message-content">
+                    <div class="react-label">💭 최종 답변</div>
                     <div class="streaming-content"></div>
                     <div class="message-time">${new Date().toLocaleTimeString()}</div>
                 </div>
@@ -224,15 +224,32 @@ function handlePartialResponse(data) {
             
             chatContainer.appendChild(messageDiv);
             currentPartialMessage = messageDiv;
+            // 스트리밍 텍스트 저장용 속성 추가
+            currentPartialMessage.streamingText = '';
             scrollToBottom();
         }
         
-        // 스트리밍 내용 업데이트
+        // ReAct 최종 답변 업데이트
         const contentDiv = currentPartialMessage.querySelector('.streaming-content');
         if (contentDiv) {
-            contentDiv.innerHTML = renderMarkdown(data.content || '');
-            scrollToBottom();
+            // 단어 단위 스트리밍 처리
+            if (data.metadata && data.metadata.word_streaming) {
+                // 새로운 단어를 텍스트로 누적 (마크다운 렌더링 없이)
+                const newWord = data.content || '';
+                currentPartialMessage.streamingText += newWord;
+                
+                // 단순히 텍스트로 표시 (줄바꿈만 <br>로 변환)
+                const displayText = escapeHtml(currentPartialMessage.streamingText).replace(/\n/g, '<br>');
+                contentDiv.innerHTML = displayText;
+                
+                console.log(`ReAct 단어 추가: "${newWord}"`);
+            } else {
+                // 전체 텍스트 교체 (기존 방식)
+                contentDiv.innerHTML = renderMarkdown(data.content || '');
+            }
         }
+        
+        scrollToBottom();
         return;
     }
     
@@ -246,7 +263,16 @@ function handlePartialResponse(data) {
                 // 스트리밍 컨텐츠 영역 추가
                 const streamingDiv = document.createElement('div');
                 streamingDiv.className = 'streaming-content';
-                streamingDiv.innerHTML = renderMarkdown(data.content || '');
+                
+                // 단어 단위 처리
+                if (data.metadata && data.metadata.word_streaming) {
+                    const displayText = escapeHtml(data.content || '').replace(/\n/g, '<br>');
+                    streamingDiv.innerHTML = displayText;
+                    // 스트리밍 텍스트 저장용 속성 추가
+                    parentMessage.streamingText = data.content || '';
+                } else {
+                    streamingDiv.innerHTML = renderMarkdown(data.content || '');
+                }
                 
                 // 도구 호출 컨테이너 다음에 응답 추가
                 currentToolCallsContainer.insertAdjacentElement('afterend', streamingDiv);
@@ -275,6 +301,8 @@ function handlePartialResponse(data) {
         
         chatContainer.appendChild(messageDiv);
         currentPartialMessage = messageDiv;
+        // 스트리밍 텍스트 저장용 속성 추가
+        currentPartialMessage.streamingText = '';
         
         // 도구 호출 컨테이너 초기화 (새로운 응답 시작)
         currentToolCallsContainer = null;
@@ -285,9 +313,24 @@ function handlePartialResponse(data) {
     // 스트리밍 내용 업데이트
     const contentDiv = currentPartialMessage.querySelector('.streaming-content');
     if (contentDiv) {
-        contentDiv.innerHTML = renderMarkdown(data.content || '');
-        scrollToBottom();
+        // 단어 단위 스트리밍 처리 (텍스트만 누적)
+        if (data.metadata && data.metadata.word_streaming) {
+            // 새로운 단어를 텍스트로 누적 (마크다운 렌더링 없이)
+            const newWord = data.content || '';
+            currentPartialMessage.streamingText += newWord;
+            
+            // 단순히 텍스트로 표시 (줄바꿈만 <br>로 변환)
+            const displayText = escapeHtml(currentPartialMessage.streamingText).replace(/\n/g, '<br>');
+            contentDiv.innerHTML = displayText;
+            
+            console.log(`단어 추가: "${newWord}" (총 길이: ${currentPartialMessage.streamingText.length})`);
+        } else {
+            // 전체 텍스트 교체 (기존 방식)
+            contentDiv.innerHTML = renderMarkdown(data.content || '');
+        }
     }
+    
+    scrollToBottom();
 }
 
 function handleFinalResponse(data) {
@@ -296,8 +339,17 @@ function handleFinalResponse(data) {
         currentPartialMessage.className = 'message assistant';
         const contentDiv = currentPartialMessage.querySelector('.streaming-content');
         if (contentDiv) {
-            contentDiv.innerHTML = renderMarkdown(data.content || '');
+            // 스트리밍 중에 누적된 텍스트가 있으면 그것을 마크다운으로 렌더링
+            if (currentPartialMessage.streamingText) {
+                contentDiv.innerHTML = renderMarkdown(currentPartialMessage.streamingText);
+                console.log('스트리밍 완료 - 마크다운 렌더링 적용');
+            } else {
+                // 스트리밍 텍스트가 없으면 서버에서 온 최종 응답 사용
+                contentDiv.innerHTML = renderMarkdown(data.content || '');
+            }
         }
+        // 스트리밍 텍스트 정리
+        delete currentPartialMessage.streamingText;
         currentPartialMessage = null;
     } else {
         // 기존 도구 호출 컨테이너가 있으면 재사용
@@ -306,7 +358,14 @@ function handleFinalResponse(data) {
             if (parentMessage) {
                 // 최종 응답 내용 추가
                 const responseDiv = document.createElement('div');
-                responseDiv.innerHTML = renderMarkdown(data.content || '');
+                
+                // 스트리밍 중에 누적된 텍스트가 있으면 그것을 사용
+                if (parentMessage.streamingText) {
+                    responseDiv.innerHTML = renderMarkdown(parentMessage.streamingText);
+                    delete parentMessage.streamingText;
+                } else {
+                    responseDiv.innerHTML = renderMarkdown(data.content || '');
+                }
                 
                 // 도구 호출 컨테이너 다음에 응답 추가
                 currentToolCallsContainer.insertAdjacentElement('afterend', responseDiv);
@@ -645,25 +704,22 @@ function addAssistantMessage(data) {
 }
 
 function showTypingIndicator() {
-    // 이미 표시 중이면 무시
-    if (typingIndicator) return;
-    
+    console.log("타이핑 인디케이터 표시 시도");
+    if (typingIndicator && chatContainer.contains(typingIndicator)) {
+        console.log("타이핑 인디케이터 이미 존재함");
+        return; // 이미 존재하면 아무것도 하지 않음
+    }
+
     typingIndicator = document.createElement('div');
-    typingIndicator.className = 'typing-indicator';
-    typingIndicator.style.display = 'flex';
+    typingIndicator.className = 'message assistant typing-indicator';
     typingIndicator.innerHTML = `
         <div class="message-avatar">🤖</div>
-        <div>
-            <div class="typing-dots">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-            <div style="font-size: 0.8rem; color: #6c757d;">입력 중...</div>
+        <div class="message-content">
+            <div class="dot-flashing"></div>
         </div>
     `;
-    
     chatContainer.appendChild(typingIndicator);
+    console.log("타이핑 인디케이터 추가됨");
     scrollToBottom();
 }
 
