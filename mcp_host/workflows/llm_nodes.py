@@ -13,11 +13,11 @@ from typing import Dict, Any, Optional
 import re
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.callbacks import BaseCallbackHandler
 
-from ..models import ChatState, IntentType, ParsedIntent
+from ..models import ChatState, IntentType, ParsedIntent, MessageRole
 from .state_utils import update_workflow_step, set_error, increment_step_count
 
 # 로깅 설정
@@ -511,10 +511,10 @@ class StreamingCallbackHandler(BaseCallbackHandler):
 
 
 async def llm_generate_response_with_streaming(state: ChatState, sse_manager, session_id: str) -> ChatState:
-    """토큰 단위 스트리밍과 함께 LLM 응답 생성"""
+    """토큰 단위 스트리밍과 함께 LLM 응답 생성 (멀티턴 대화 지원)"""
     try:
         increment_step_count(state)
-        logger.info("LLM 스트리밍 응답 생성 시작")
+        logger.info("LLM 스트리밍 응답 생성 시작 (멀티턴 대화 포함)")
         
         user_input = state.get("current_message", BaseMessage(content="", type="human")).content
         tool_calls = state.get("tool_calls", [])
@@ -534,42 +534,62 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         # 일반 LLM 사용 (스트리밍 없이)
         llm = get_llm()
         
-        # 응답 생성 프롬프트 구성 (기존과 동일)
+        # 응답 생성 프롬프트 구성 (대화 히스토리 포함)
         system_message = """당신은 친절하고 도움이 되는 AI 어시스턴트입니다.
-사용자의 질문에 대해 정확하고 유용한 답변을 제공해주세요.
+사용자와의 연속적인 대화를 통해 맥락을 이해하고 일관성 있는 답변을 제공해주세요.
 
-만약 외부 도구(MCP 도구)를 사용한 결과가 있다면, 그 결과를 바탕으로 답변해주세요.
-결과가 없거나 오류가 있다면, 일반적인 지식으로 최선의 답변을 제공해주세요.
+**대화 맥락 활용**:
+- 이전 대화 내용을 참조하여 답변하세요
+- 사용자가 "그것", "그거", "위에서 말한" 등으로 이전 내용을 언급하면 대화 히스토리를 확인하세요
+- 연관된 주제나 후속 질문에 대해서는 맥락을 유지하세요
+
+**도구 결과 활용**:
+- 외부 도구(MCP 도구) 결과가 있다면, 그 결과를 바탕으로 답변해주세요
+- 결과가 없거나 오류가 있다면, 일반적인 지식으로 최선의 답변을 제공해주세요
 
 **응답 형식**: 
 - 마크다운 형식으로 답변을 작성해주세요
 - 적절한 제목(##), 목록(-), 강조(**텍스트**), 코드(`코드`) 등을 사용하세요
 - 답변은 한국어로 친근하고 이해하기 쉽게 작성해주세요
-- 정보가 많을 때는 구조화된 형태로 정리해주세요."""
+- 정보가 많을 때는 구조화된 형태로 정리해주세요"""
 
         messages = [SystemMessage(content=system_message)]
         
-        # 사용자 메시지 추가
-        user_input = state.get("current_message", BaseMessage(content="", type="human")).content
+        # 대화 히스토리 불러오기 및 추가
+        conversation_history = state.get("messages", [])
+        logger.info(f"대화 히스토리: {len(conversation_history)}개 메시지")
         
-        # 기본 사용자 컨텐츠 초기화
-        user_content = f"사용자 질문: {user_input}"
+        if len(conversation_history) > 1:  # 현재 메시지 외에 이전 메시지가 있는 경우
+            logger.info("이전 대화 히스토리를 LLM 컨텍스트에 포함")
+            
+            # 이전 메시지들 (현재 메시지 제외)을 LLM 메시지로 변환
+            for msg in conversation_history[:-1]:  # 마지막 메시지(현재 메시지) 제외
+                if msg.role == MessageRole.USER:
+                    messages.append(HumanMessage(content=msg.content))
+                elif msg.role == MessageRole.ASSISTANT:
+                    messages.append(AIMessage(content=msg.content))
+                # TOOL 메시지는 스킵 (LLM 메시지 타입에 없음)
+        
+        # 현재 사용자 메시지 및 도구 결과 추가
+        current_user_content = f"사용자 질문: {user_input}"
         
         # MCP 도구 호출 결과가 있다면 추가
         if tool_calls:
-            user_content += "\n\n도구 실행 결과:"
+            current_user_content += "\n\n방금 실행된 도구 결과:"
             for i, mcp_call in enumerate(tool_calls):
                 if mcp_call.is_successful():
-                    user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: {mcp_call.result}"
+                    current_user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: {mcp_call.result}"
                 else:
-                    user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: 오류 - {mcp_call.error}"
+                    current_user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: 오류 - {mcp_call.error}"
             
             # 도구 호출 정보 요약 추가
-            user_content += "\n\n사용된 도구:"
+            current_user_content += "\n\n사용된 도구:"
             for mcp_call in tool_calls:
-                user_content += f"\n- {mcp_call.server_name}.{mcp_call.tool_name}({mcp_call.arguments})"
+                current_user_content += f"\n- {mcp_call.server_name}.{mcp_call.tool_name}({mcp_call.arguments})"
         
-        messages.append(HumanMessage(content=user_content))
+        messages.append(HumanMessage(content=current_user_content))
+        
+        logger.info(f"LLM에 전달할 메시지 수: {len(messages)} (시스템: 1, 히스토리: {len(conversation_history)-1}, 현재: 1)")
         
         logger.info("LLM 응답 생성 중...")
         # 먼저 전체 응답 생성
@@ -626,6 +646,10 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         state["response"] = generated_response
         state["success"] = True
         update_workflow_step(state, "completed")
+        
+        # 응답을 세션에 저장 (중요!)
+        from .state import add_assistant_message
+        add_assistant_message(state, generated_response)
         
         # 최종 응답 메시지 전송
         logger.info("final_response 전송 중...")

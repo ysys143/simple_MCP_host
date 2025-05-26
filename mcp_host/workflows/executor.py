@@ -17,6 +17,7 @@ from langgraph.graph import StateGraph, END
 
 from ..models import ChatState
 from .llm_nodes import llm_parse_intent, llm_call_mcp_tool, llm_generate_response, llm_generate_response_with_streaming
+from .state import create_initial_state
 
 
 # 로깅 설정
@@ -76,22 +77,16 @@ class MCPWorkflowExecutor:
         try:
             self._logger.info(f"워크플로우 실행 시작 - 세션: {session_id}")
             
-            # 초기 상태 구성 (models.py의 ChatState 구조 사용)
-            initial_state: ChatState = {
-                "current_message": BaseMessage(content=user_message, type="human"),
-                "session_id": session_id,
-                "context": context or {},
-                "mcp_client": mcp_client,
-                "messages": [],
-                "parsed_intent": None,
-                "tool_calls": [],
-                "tool_results": [],
-                "response": "",
-                "success": False,
-                "error": None,
-                "step_count": 0,
-                "next_step": None
-            }
+            # 초기 상태 구성 - create_initial_state 사용
+            initial_state = create_initial_state(
+                user_message=user_message,
+                session_id=session_id,
+                mcp_client=mcp_client
+            )
+            
+            # 컨텍스트 정보 추가
+            if context:
+                initial_state["context"].update(context)
             
             # 워크플로우 실행
             result = await self.workflow.ainvoke(initial_state)
@@ -179,22 +174,16 @@ class MCPWorkflowExecutor:
             )
             await sse_manager.send_to_session(session_id, thinking_msg)
             
-            # 초기 상태 구성
-            initial_state: ChatState = {
-                "current_message": BaseMessage(content=user_message, type="human"),
-                "session_id": session_id,
-                "context": context or {},
-                "mcp_client": mcp_client,
-                "messages": [],
-                "parsed_intent": None,
-                "tool_calls": [],
-                "tool_results": [],
-                "response": "",
-                "success": False,
-                "error": None,
-                "step_count": 0,
-                "next_step": None
-            }
+            # 초기 상태 구성 - create_initial_state 사용
+            initial_state = create_initial_state(
+                user_message=user_message,
+                session_id=session_id,
+                mcp_client=mcp_client
+            )
+            
+            # 컨텍스트 정보 추가
+            if context:
+                initial_state["context"].update(context)
             
             # 의도 분석 실행
             thinking_msg = create_thinking_message(

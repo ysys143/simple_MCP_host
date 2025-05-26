@@ -69,6 +69,11 @@ class MCPHostApp:
         try:
             self._logger.info("MCP 호스트 애플리케이션 시작")
             
+            # 세션 관리자 초기화
+            from ..sessions import initialize_session_manager
+            await initialize_session_manager()
+            self._logger.info("세션 관리자 초기화 완료")
+            
             # Enhanced MCP Client 초기화 (JSON 파일 직접 사용)
             self.mcp_client = EnhancedMCPClient()
             await self.mcp_client.initialize("mcp_servers.json")
@@ -90,6 +95,11 @@ class MCPHostApp:
         """애플리케이션 종료 시 정리 작업"""
         try:
             self._logger.info("MCP 호스트 애플리케이션 종료")
+            
+            # 세션 관리자 종료
+            from ..sessions import shutdown_session_manager
+            await shutdown_session_manager()
+            self._logger.info("세션 관리자 종료 완료")
             
             if self.mcp_client:
                 await self.mcp_client.close()

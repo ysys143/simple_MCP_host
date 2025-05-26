@@ -22,7 +22,7 @@ def create_initial_state(
     user_id: Optional[str] = None,
     mcp_client: Optional[Any] = None
 ) -> ChatState:
-    """초기 채팅 상태를 생성합니다
+    """초기 채팅 상태를 생성합니다 (세션 히스토리 포함)
     
     Args:
         user_message: 사용자 메시지
@@ -31,17 +31,64 @@ def create_initial_state(
         mcp_client: Enhanced MCP Client 인스턴스 (선택적)
     
     Returns:
-        초기화된 ChatState
+        초기화된 ChatState (기존 대화 히스토리 포함)
     """
-    initial_message = ChatMessage(
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 새로운 사용자 메시지 생성
+    new_user_message = ChatMessage(
         role=MessageRole.USER,
         content=user_message,
         timestamp=datetime.now()
     )
     
+    # 기존 대화 히스토리 불러오기
+    existing_messages = []
+    if session_id:
+        try:
+            # 순환 import 방지를 위해 함수 내에서 import
+            from ..sessions import get_session_manager
+            session_manager = get_session_manager()
+            
+            logger.info(f"세션 히스토리 로딩 시도 - 세션 ID: {session_id}")
+            
+            # 세션에 새 사용자 메시지 추가 (히스토리에 저장)
+            session_manager.add_user_message(session_id, user_message)
+            logger.info(f"사용자 메시지 세션에 추가 완료: {len(user_message)} 글자")
+            
+            # 기존 메시지들을 ChatMessage 객체로 변환
+            history = session_manager.get_conversation_history(session_id, limit=50)
+            logger.info(f"세션에서 불러온 히스토리: {len(history)}개 메시지")
+            
+            for i, msg_dict in enumerate(history[:-1]):  # 마지막 메시지는 방금 추가한 것이므로 제외
+                logger.debug(f"히스토리 메시지 {i}: {msg_dict}")
+                role_map = {
+                    "user": MessageRole.USER,
+                    "assistant": MessageRole.ASSISTANT, 
+                    "tool": MessageRole.TOOL
+                }
+                if msg_dict["role"] in role_map:
+                    existing_messages.append(ChatMessage(
+                        role=role_map[msg_dict["role"]],
+                        content=msg_dict["content"],
+                        timestamp=datetime.fromisoformat(msg_dict["timestamp"])
+                    ))
+            
+            logger.info(f"변환된 기존 메시지 수: {len(existing_messages)}개")
+            
+        except Exception as e:
+            # 세션 관리 오류가 있어도 기본 동작은 유지
+            logger.warning(f"세션 히스토리 로드 실패: {e}")
+            logger.exception("세션 히스토리 로드 오류 상세:")
+    
+    # 전체 메시지 리스트 구성 (기존 히스토리 + 새 메시지)
+    all_messages = existing_messages + [new_user_message]
+    logger.info(f"최종 메시지 리스트 크기: {len(all_messages)}개 (기존: {len(existing_messages)}개, 새 메시지: 1개)")
+    
     state: ChatState = {
-        "messages": [initial_message],
-        "current_message": initial_message,
+        "messages": all_messages,
+        "current_message": new_user_message,  # 현재 처리할 메시지는 새 메시지
         "parsed_intent": None,
         "tool_calls": [],  # models.py의 ChatState 구조에 맞춤
         "tool_results": [],
@@ -66,6 +113,9 @@ def add_assistant_message(state: ChatState, content: str, metadata: Optional[Dic
         content: 메시지 내용
         metadata: 메시지 메타데이터 (선택적)
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     assistant_message = ChatMessage(
         role=MessageRole.ASSISTANT,
         content=content,
@@ -75,6 +125,23 @@ def add_assistant_message(state: ChatState, content: str, metadata: Optional[Dic
     
     state["messages"].append(assistant_message)
     state["response"] = content
+    
+    logger.info(f"상태에 어시스턴트 메시지 추가: {len(content)} 글자, 총 메시지: {len(state['messages'])}개")
+    
+    # 세션에도 저장
+    session_id = state.get("session_id")
+    if session_id:
+        try:
+            from ..sessions import get_session_manager
+            session_manager = get_session_manager()
+            logger.info(f"세션에 어시스턴트 메시지 저장 시도 - 세션 ID: {session_id}")
+            session_manager.add_assistant_message(session_id, content, metadata)
+            logger.info(f"세션에 어시스턴트 메시지 저장 완료")
+        except Exception as e:
+            logger.warning(f"세션에 어시스턴트 메시지 저장 실패: {e}")
+            logger.exception("어시스턴트 메시지 저장 오류 상세:")
+    else:
+        logger.warning("session_id가 없어 세션에 메시지를 저장할 수 없습니다")
 
 
 def add_tool_message(state: ChatState, tool_call: MCPToolCall) -> None:
