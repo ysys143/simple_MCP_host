@@ -11,6 +11,9 @@ from pathlib import Path
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+# main.py에서 설정한 json_rpc 로거를 이름으로 가져옵니다.
+json_rpc_logger = logging.getLogger('json_rpc')
+
 
 class EnhancedMCPClient:
     """langchain-mcp-adapters 기반 향상된 MCP 클라이언트
@@ -81,13 +84,14 @@ class EnhancedMCPClient:
             self._tools_dict = {}
             raise
     
-    async def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    async def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any], session_id: Optional[str] = "UNKNOWN_SESSION") -> Any:
         """MCP 도구를 실제로 호출합니다
         
         Args:
             server_name: 서버 이름
             tool_name: 도구 이름
             arguments: 도구 인자
+            session_id: 현재 요청의 세션 ID (로깅용)
             
         Returns:
             도구 실행 결과
@@ -96,6 +100,21 @@ class EnhancedMCPClient:
             ValueError: 도구를 찾을 수 없는 경우
             Exception: 도구 실행 실패
         """
+        # JSON-RPC 요청 객체 생성 (로깅용)
+        request_payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call", 
+            "params": {
+                "server": server_name,
+                "name": tool_name,
+                "arguments": arguments
+            },
+            "id": f"mcp-host-{Path(session_id).name}-{int(asyncio.get_event_loop().time() * 1000)}"
+        }
+        
+        # 요청 로깅
+        json_rpc_logger.info(f"[SESSION:{session_id}] [REQUEST] -> {json.dumps(request_payload, ensure_ascii=False)}")
+        
         try:
             # 도구 찾기
             if tool_name not in self._tools_dict:
@@ -105,16 +124,44 @@ class EnhancedMCPClient:
             tool = self._tools_dict[tool_name]
             
             # 도구 실행
-            self._logger.info(f"실제 MCP 도구 호출: {server_name}.{tool_name}")
+            self._logger.info(f"실제 MCP 도구 호출: {server_name}.{tool_name}") # 기존 내부 로깅
             
-            # LangChain 도구 호출
-            result = await tool.ainvoke(arguments)
+            # LangChain 도구 호출 - session_id를 여기서 전달하지 않습니다.
+            result = await tool.ainvoke(arguments) 
             
-            self._logger.info(f"MCP 도구 호출 성공: {tool_name}")
+            self._logger.info(f"MCP 도구 호출 성공: {tool_name}") # 기존 내부 로깅
+
+            # JSON-RPC 응답 객체 생성 (로깅용)
+            response_payload = {
+                "jsonrpc": "2.0",
+                "result": result, 
+                "id": request_payload["id"] 
+            }
+            # 응답 로깅
+            json_rpc_logger.info(f"[SESSION:{session_id}] [RESPONSE] <- {json.dumps(response_payload, ensure_ascii=False, default=str)}")
+
             return result
             
         except Exception as e:
-            self._logger.error(f"MCP 도구 호출 실패 {server_name}.{tool_name}: {e}")
+            self._logger.error(f"MCP 도구 호출 실패 {server_name}.{tool_name}: {e}") # 기존 내부 로깅
+            
+            # JSON-RPC 에러 응답 객체 생성 (로깅용)
+            error_response_payload = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32000, 
+                    "message": f"Tool execution failed: {str(e)}",
+                    "data": {
+                        "server": server_name,
+                        "tool": tool_name,
+                        "arguments": arguments
+                    }
+                },
+                "id": request_payload["id"]
+            }
+            # 에러 응답 로깅
+            json_rpc_logger.error(f"[SESSION:{session_id}] [RESPONSE_ERROR] <- {json.dumps(error_response_payload, ensure_ascii=False)}")
+            
             raise
     
     def get_tools(self) -> List[Any]:

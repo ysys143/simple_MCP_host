@@ -1,0 +1,2 @@
+2025-05-26 20:40:21,304 - INFO - [SESSION:web_i724n3qfx_1748259618088] [REQUEST] -> {"jsonrpc": "2.0", "method": "tools/call", "params": {"server": "weather", "name": "get_weather", "arguments": {"location": "서울"}}, "id": "mcp-host-web_i724n3qfx_1748259618088-261764217"}
+2025-05-26 20:40:21,496 - INFO - [SESSION:web_i724n3qfx_1748259618088] [RESPONSE] <- {"jsonrpc": "2.0", "result": "맑음, 23도", "id": "mcp-host-web_i724n3qfx_1748259618088-261764217"}

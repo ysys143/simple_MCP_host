@@ -204,6 +204,9 @@ async def call_mcp_tool(state: ChatState) -> ChatState:
     """
     logger = logging.getLogger(__name__)
     
+    # 세션 ID 가져오기
+    session_id = state.get("session_id", "UNKNOWN_WORKFLOW_SESSION")
+
     try:
         parsed_intent = state.get("parsed_intent")
         if not parsed_intent:
@@ -231,7 +234,8 @@ async def call_mcp_tool(state: ChatState) -> ChatState:
                 result = await mcp_client.call_tool(
                     server_name=parsed_intent.target_server,
                     tool_name=parsed_intent.target_tool,
-                    arguments=arguments
+                    arguments=arguments,
+                    session_id=session_id
                 )
                 
                 end_time = datetime.now()

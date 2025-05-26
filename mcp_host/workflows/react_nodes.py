@@ -507,6 +507,9 @@ async def _call_mcp_tool(state: ChatState, tool_name: str, arguments_str: str) -
     from datetime import datetime
     import time
     
+    # 세션 ID 가져오기
+    session_id = state.get("session_id", "UNKNOWN_REACT_SESSION")
+
     # 도구별 적절한 인수 구성
     if tool_name == "get_weather":
         arguments = {"location": arguments_str.strip()}
@@ -544,8 +547,8 @@ async def _call_mcp_tool(state: ChatState, tool_name: str, arguments_str: str) -
         
         logger.info(f"실제 MCP 도구 호출: {server_name}.{tool_name}")
         
-        # Enhanced MCP Client의 call_tool 메서드 사용 (server_name, tool_name, arguments 순서)
-        result = await mcp_client.call_tool(server_name, tool_name, arguments)
+        # Enhanced MCP Client의 call_tool 메서드 사용 (server_name, tool_name, arguments, session_id 순서)
+        result = await mcp_client.call_tool(server_name, tool_name, arguments, session_id=session_id)
         
         tool_call.result = result
         tool_call.execution_time_ms = int((time.time() - start_time) * 1000)

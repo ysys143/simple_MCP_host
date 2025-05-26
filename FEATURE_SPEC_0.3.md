@@ -78,43 +78,17 @@ data: {"type": "response", "content": "서울은 현재 맑습니다"}
 5. Act: "한강공원, 남산공원을 추천드립니다"
 ```
 
+### 4. JSON-RPC 호출 로깅 (신규)
+
+**목표**: MCP 도구 호출 시 주고받는 JSON-RPC 메시지를 로그 파일로 저장하여 디버깅 및 분석 용이성 확보
+
+**핵심 요구사항**:
+- `mcp_host`가 외부 MCP 서버와 통신하는 모든 JSON-RPC 요청 및 응답 로깅
+- 로그 파일 위치: `logs/mcp_json_rpc.log`
+- 로그 정보: 타임스탬프, 세션 ID, 방향 (REQUEST/RESPONSE), 전체 JSON-RPC 객체
+- Python의 `logging` 모듈 사용
+
 ## 구현 계획
 
 ### Phase 1: SSE 스트리밍 (2일)
 ```
-mcp_host/streaming/
-├── message_types.py    # 스트림 메시지 타입
-├── sse_manager.py      # SSE 연결 관리  
-└── stream_handler.py   # 스트리밍 처리
-```
-
-### Phase 2: 멀티턴 세션 (1일)  
-```
-mcp_host/sessions/
-├── session_manager.py  # 세션 생명주기
-├── memory_store.py     # 메모리 기반 저장소
-└── context_manager.py  # 대화 컨텍스트
-```
-
-### Phase 3: ReAct 패턴 (2일)
-```
-mcp_host/react/
-├── react_executor.py   # ReAct 실행기
-├── reasoning_node.py   # 추론 노드
-├── action_node.py      # 행동 노드
-└── observation_node.py # 관찰 노드
-```
-
-## 성공 기준
-
-- ✅ 세션으로 대화 연결 가능
-- ✅ SSE로 실시간 응답 받기 가능  
-- ✅ ReAct 과정이 단계별로 노출됨
-- ✅ 기존 기능 정상 동작 유지
-
-## 제외 사항
-
-- 복잡한 보안 기능 (기본 CORS만)
-- 고급 성능 최적화 (기본 동작에 집중)
-- 데이터베이스 연동 (메모리 저장소 사용)
-- 복잡한 UI (기본 테스트 가능한 수준)
