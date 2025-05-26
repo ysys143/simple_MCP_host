@@ -393,6 +393,41 @@
                 padding: 0;
             }
         }
+
+        /* 스트리밍 메시지 스타일 */
+        .message.streaming .message-content {
+            background: #f8fff9;
+            border-left: 3px solid #28a745;
+            position: relative;
+        }
+
+        .message.streaming .streaming-content {
+            min-height: 20px;
+        }
+
+        .message.streaming::after {
+            content: "💬";
+            position: absolute;
+            right: -10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: #28a745;
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: translateY(-50%) scale(1); opacity: 1; }
+            50% { transform: translateY(-50%) scale(1.1); opacity: 0.7; }
+            100% { transform: translateY(-50%) scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -460,53 +495,165 @@
     </div>
 
     <script>
-        let ws = null;
-        const chatContainer = document.getElementById('chatContainer');
-        const messageInput = document.getElementById('messageInput');
-        const sendButton = document.getElementById('sendButton');
-        const connectionStatus = document.getElementById('connectionStatus');
-        const serverCount = document.getElementById('serverCount');
-        const toolCount = document.getElementById('toolCount');
+        // 전역 변수들
+        let eventSource = null;  // WebSocket 대신 SSE 사용
+        let connectionStatus, serverCount, toolCount, chatContainer, messageInput, sendButton;
         let typingIndicator = null;
-        let isSending = false; // 중복 전송 방지 플래그
-        let isComposing = false; // IME 조합 상태 추적
-        let pendingEnter = false; // Enter 키 대기 상태
+        let isSending = false;
+        let isComposing = false;
+        let pendingEnter = false;
+        let sessionId = null;
+        let currentPartialMessage = null; // 스트리밍 메시지 추적
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            // 요소 참조 저장
+            connectionStatus = document.getElementById('connectionStatus');
+            serverCount = document.getElementById('serverCount');
+            toolCount = document.getElementById('toolCount');
+            chatContainer = document.getElementById('chatContainer');
+            messageInput = document.getElementById('messageInput');
+            sendButton = document.getElementById('sendButton');
+            
+            // 초기 연결
+            connect();
+        });
+
+        // 세션 ID 생성
+        function generateSessionId() {
+            return 'web_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        }
 
         function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            console.log('SSE 연결 시도 중...');
+            updateConnectionStatus('initializing', '🟡 연결 중...');
             
-            ws.onopen = function() {
-                updateConnectionStatus('connected', '🟢 연결됨');
-                loadSystemInfo();
-            };
-            
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                console.log('WebSocket 응답 수신:', data);
+            try {
+                // 기존 SSE 연결이 있다면 종료
+                if (eventSource) {
+                    eventSource.close();
+                }
+
+                // 세션 ID가 없을 때만 새로 생성 (재사용)
+                if (!sessionId) {
+                    sessionId = generateSessionId();
+                    console.log('새 세션 ID 생성:', sessionId);
+                } else {
+                    console.log('기존 세션 ID 재사용:', sessionId);
+                }
+
+                const url = `/api/v3/chat/stream?session_id=${sessionId}`;
+                console.log('SSE 연결 URL:', url);
                 
-                // 응답 수신 시 전송 플래그 해제
-                isSending = false;
-                sendButton.disabled = false;
+                eventSource = new EventSource(url);
+
+                eventSource.onopen = function(event) {
+                    console.log('SSE 연결 열림');
+                    updateConnectionStatus('connected', '🟢 연결됨');
+                    loadSystemInfo();
+                };
+
+                eventSource.onmessage = function(event) {
+                    console.log('SSE 메시지 수신:', event.data);
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'partial_response') {
+                            // 토큰 단위 스트리밍 처리
+                            handlePartialResponse(data);
+                        } else if (data.type === 'final_response') {
+                            // 최종 응답 처리
+                            handleFinalResponse(data);
+                            
+                            // 응답 완료 시 전송 플래그 해제
+                            isSending = false;
+                            sendButton.disabled = false;
+                            hideTypingIndicator();
+                        } else if (data.type === 'thinking' || data.type === 'acting' || data.type === 'observing') {
+                            // 진행 상태 메시지는 무시하거나 로그만
+                            console.log('진행 상태:', data.type, data.content);
+                        } else if (data.type === 'error') {
+                            // 오류 처리
+                            hideTypingIndicator();
+                            addAssistantMessage({ response: `오류가 발생했습니다: ${data.content}` });
+                            
+                            isSending = false;
+                            sendButton.disabled = false;
+                        } else {
+                            console.log('기타 메시지 타입:', data.type);
+                        }
+                    } catch (e) {
+                        console.error('JSON 파싱 오류:', e.message);
+                        console.log('원본 데이터:', event.data);
+                    }
+                };
+
+                eventSource.onerror = function(event) {
+                    console.error('SSE 오류:', event);
+                    updateConnectionStatus('disconnected', '🔴 연결 끊김');
+                    setTimeout(connect, 3000); // 재연결 시도
+                };
                 
-                hideTypingIndicator();
-                addAssistantMessage(data);
-            };
-            
-            ws.onclose = function() {
-                updateConnectionStatus('disconnected', '🔴 연결 끊김');
-                setTimeout(connect, 3000); // 재연결 시도
-            };
-            
-            ws.onerror = function(error) {
-                console.error('WebSocket 오류:', error);
+            } catch (error) {
+                console.error('연결 시도 중 오류:', error);
                 updateConnectionStatus('disconnected', '🔴 연결 오류');
-            };
+            }
+        }
+
+        function handlePartialResponse(data) {
+            if (!currentPartialMessage) {
+                // 새로운 스트리밍 메시지 시작
+                hideTypingIndicator(); // 타이핑 인디케이터 숨김
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message assistant streaming';
+                messageDiv.innerHTML = `
+                    <div class="message-avatar">🤖</div>
+                    <div class="message-content">
+                        <div class="streaming-content"></div>
+                        <div class="message-time">${new Date().toLocaleTimeString()}</div>
+                    </div>
+                `;
+                
+                chatContainer.appendChild(messageDiv);
+                currentPartialMessage = messageDiv;
+                scrollToBottom();
+            }
+            
+            // 스트리밍 내용 업데이트
+            const contentDiv = currentPartialMessage.querySelector('.streaming-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = renderMarkdown(data.content || '');
+                scrollToBottom();
+            }
+        }
+
+        function handleFinalResponse(data) {
+            if (currentPartialMessage) {
+                // 기존 스트리밍 메시지를 최종 응답으로 변경
+                currentPartialMessage.className = 'message assistant';
+                const contentDiv = currentPartialMessage.querySelector('.streaming-content');
+                if (contentDiv) {
+                    contentDiv.innerHTML = renderMarkdown(data.content || '');
+                }
+                currentPartialMessage = null;
+            } else {
+                // 새로운 최종 응답 메시지 (스트리밍 없이)
+                hideTypingIndicator();
+                addAssistantMessage({ response: data.content });
+            }
+            scrollToBottom();
         }
 
         function updateConnectionStatus(status, text) {
             connectionStatus.className = `status ${status}`;
-            connectionStatus.querySelector('span').textContent = text;
+            const statusText = connectionStatus.querySelector('span');
+            if (statusText) {
+                statusText.textContent = text;
+            } else {
+                // span이 없으면 직접 텍스트 설정
+                connectionStatus.innerHTML = `<span class="status-dot"></span><span>${text}</span>`;
+            }
         }
 
         async function loadSystemInfo() {
@@ -661,17 +808,42 @@
             const message = messageInput.value.trim();
             console.log('전송할 메시지:', message);
             
-            if (message && ws && ws.readyState === WebSocket.OPEN) {
+            if (message && sessionId) {
                 isSending = true; // 전송 시작
                 
                 addUserMessage(message);
                 showTypingIndicator();
                 
-                console.log('WebSocket으로 메시지 전송');
-                ws.send(JSON.stringify({
-                    message: message,
-                    session_id: 'web_' + Date.now()
-                }));
+                // SSE는 단방향이므로 HTTP POST로 메시지 전송
+                fetch('/api/v3/chat/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                })
+                .then(response => response.json())
+                .then(result => {
+                    console.log('메시지 전송 완료:', result);
+                    if (!result.success) {
+                        console.error('메시지 전송 실패:', result);
+                        hideTypingIndicator();
+                        addAssistantMessage({ response: `전송 실패: ${result.error || '알 수 없는 오류'}` });
+                        isSending = false;
+                        sendButton.disabled = false;
+                    }
+                    // 성공시에는 SSE를 통해 응답이 올 것이므로 여기서는 아무것도 하지 않음
+                })
+                .catch(error => {
+                    console.error('메시지 전송 오류:', error);
+                    hideTypingIndicator();
+                    addAssistantMessage({ response: `전송 오류: ${error.message}` });
+                    isSending = false;
+                    sendButton.disabled = false;
+                });
                 
                 // 강제 입력창 클리어 사용
                 forceClearInput();
@@ -679,12 +851,15 @@
                 autoResize();
                 sendButton.disabled = true;
                 
-                // 1초 후 전송 플래그 해제
+                // 타임아웃 안전장치 (30초)
                 setTimeout(() => {
-                    isSending = false;
-                    sendButton.disabled = false;
-                    console.log('전송 플래그 해제');
-                }, 1000);
+                    if (isSending) {
+                        console.log('타임아웃으로 전송 플래그 해제');
+                        isSending = false;
+                        sendButton.disabled = false;
+                        hideTypingIndicator();
+                    }
+                }, 30000);
             }
         }
 
@@ -749,9 +924,6 @@
         });
 
         messageInput.addEventListener('input', autoResize);
-
-        // 초기 연결
-        connect();
 
         // marked.js 로드 확인
         document.addEventListener('DOMContentLoaded', function() {

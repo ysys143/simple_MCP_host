@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE 스트리밍 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 10px 0;
+        }
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+            background: #f9f9f9;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            background: white;
+        }
+        .message.thinking { border-left-color: #ffc107; }
+        .message.acting { border-left-color: #17a2b8; }
+        .message.final_response { border-left-color: #28a745; }
+        .message.error { border-left-color: #dc3545; background: #f8d7da; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.connected { background: #d4edda; color: #155724; }
+        .status.disconnected { background: #f8d7da; color: #721c24; }
+        .session-info {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>SSE 스트리밍 테스트</h1>
+    
+    <div class="container">
+        <h3>연결 상태</h3>
+        <div id="status" class="status disconnected">연결되지 않음</div>
+        <div class="session-info">
+            세션 ID: <span id="sessionId">생성 중...</span>
+        </div>
+        
+        <div class="controls">
+            <button id="connectBtn" onclick="connect()">연결</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>연결 해제</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h3>메시지 전송</h3>
+        <div class="controls">
+            <input type="text" id="messageInput" placeholder="메시지를 입력하세요..." 
+                   onkeypress="if(event.key==='Enter') sendMessage()">
+            <button id="sendBtn" onclick="sendMessage()" disabled>전송</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h3>수신된 메시지</h3>
+        <div id="messages" class="messages"></div>
+        <button onclick="clearMessages()">메시지 지우기</button>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let sessionId = null;
+        let isConnected = false;
+
+        // 세션 ID 생성
+        function generateSessionId() {
+            return 'session_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // 메시지 추가
+        function addMessage(type, content, timestamp = null) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+            messageDiv.innerHTML = `
+                <strong>[${type.toUpperCase()}]</strong> ${time}<br>
+                ${content}
+            `;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // 상태 업데이트
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const sendBtn = document.getElementById('sendBtn');
+            
+            isConnected = connected;
+            
+            if (connected) {
+                statusDiv.textContent = '연결됨';
+                statusDiv.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+            } else {
+                statusDiv.textContent = '연결되지 않음';
+                statusDiv.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+            }
+        }
+
+        // SSE 연결
+        function connect() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            sessionId = generateSessionId();
+            document.getElementById('sessionId').textContent = sessionId;
+
+            const url = `/api/v3/chat/stream?session_id=${sessionId}`;
+            eventSource = new EventSource(url);
+
+            eventSource.onopen = function(event) {
+                console.log('SSE 연결 열림:', event);
+                updateStatus(true);
+                addMessage('system', 'SSE 연결이 열렸습니다.');
+            };
+
+            eventSource.onmessage = function(event) {
+                console.log('SSE 메시지 수신:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(data.type || 'unknown', data.content || '내용 없음', data.timestamp);
+                } catch (e) {
+                    addMessage('system', `원본 데이터: ${event.data}`);
+                }
+            };
+
+            eventSource.onerror = function(event) {
+                console.error('SSE 오류:', event);
+                addMessage('error', 'SSE 연결 오류가 발생했습니다.');
+                updateStatus(false);
+            };
+        }
+
+        // SSE 연결 해제
+        function disconnect() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            updateStatus(false);
+            addMessage('system', 'SSE 연결이 해제되었습니다.');
+        }
+
+        // 메시지 전송
+        async function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message || !sessionId) {
+                alert('메시지를 입력하고 연결을 확인해주세요.');
+                return;
+            }
+
+            try {
+                addMessage('user', `전송: ${message}`);
+                
+                const response = await fetch('/api/v3/chat/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    messageInput.value = '';
+                    addMessage('system', '메시지가 전송되었습니다.');
+                } else {
+                    addMessage('error', `전송 실패: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('메시지 전송 오류:', error);
+                addMessage('error', `전송 오류: ${error.message}`);
+            }
+        }
+
+        // 메시지 지우기
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            updateStatus(false);
+            sessionId = generateSessionId();
+            document.getElementById('sessionId').textContent = sessionId;
+        };
+
+        // 페이지 언로드 시 연결 해제
+        window.onbeforeunload = function() {
+            if (eventSource) {
+                eventSource.close();
+            }
+        };
+    </script>
+</body>
+</html> 

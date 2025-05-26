@@ -13,11 +13,12 @@ from typing import Dict, Any, Optional
 import re
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.callbacks import BaseCallbackHandler
 
 from ..models import ChatState, IntentType, ParsedIntent
-from .state_utils import update_workflow_step, set_error
+from .state_utils import update_workflow_step, set_error, increment_step_count
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -316,6 +317,9 @@ def llm_generate_response(state: ChatState) -> ChatState:
         messages = [SystemMessage(content=system_message)]
         
         # 사용자 메시지 추가
+        user_input = state.get("current_message", BaseMessage(content="", type="human")).content
+        
+        # 기본 사용자 컨텐츠 초기화
         user_content = f"사용자 질문: {user_input}"
         
         # MCP 도구 호출 결과가 있다면 추가
@@ -326,9 +330,8 @@ def llm_generate_response(state: ChatState) -> ChatState:
                     user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: {mcp_call.result}"
                 else:
                     user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: 오류 - {mcp_call.error}"
-        
-        # 도구 호출 정보 요약 추가
-        if tool_calls:
+            
+            # 도구 호출 정보 요약 추가
             user_content += "\n\n사용된 도구:"
             for mcp_call in tool_calls:
                 user_content += f"\n- {mcp_call.server_name}.{mcp_call.tool_name}({mcp_call.arguments})"
@@ -443,4 +446,203 @@ def _determine_target_from_intent(intent_type: IntentType, parameters: Dict[str,
         # 이러한 요청들은 MCP 도구 호출이 아닌 시스템 정보 제공
         return None, None
     
-    return None, None 
+    return None, None
+
+
+class StreamingCallbackHandler(BaseCallbackHandler):
+    """토큰 단위 스트리밍을 위한 콜백 핸들러"""
+    
+    def __init__(self, sse_manager, session_id: str):
+        self.sse_manager = sse_manager
+        self.session_id = session_id
+        self.current_content = ""
+        self.token_count = 0
+    
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        """새 토큰이 생성될 때마다 호출"""
+        if token and token.strip():  # 공백 토큰 무시
+            self.current_content += token
+            self.token_count += 1
+            
+            # 매 3개 토큰마다 전송
+            if self.token_count % 3 == 0:
+                self._send_partial_update_sync()
+    
+    def on_llm_end(self, response, **kwargs) -> None:
+        """LLM 응답 완료 시 마지막 토큰들 전송"""
+        if self.current_content:
+            self._send_partial_update_sync()
+    
+    def _send_partial_update_sync(self):
+        """부분 업데이트를 동기적으로 전송"""
+        try:
+            from ..streaming import create_partial_response_message
+            
+            partial_msg = create_partial_response_message(
+                self.current_content,
+                self.session_id
+            )
+            
+            # 이벤트 루프가 실행 중인지 확인하고 안전하게 전송
+            import asyncio
+            import threading
+            
+            def send_message():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(
+                        self.sse_manager.send_to_session(self.session_id, partial_msg)
+                    )
+                    loop.close()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"스트리밍 전송 스레드 오류: {e}")
+            
+            # 별도 스레드에서 실행
+            thread = threading.Thread(target=send_message, daemon=True)
+            thread.start()
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"부분 응답 전송 실패: {e}")
+
+
+async def llm_generate_response_with_streaming(state: ChatState, sse_manager, session_id: str) -> ChatState:
+    """토큰 단위 스트리밍과 함께 LLM 응답 생성"""
+    try:
+        increment_step_count(state)
+        logger.info("🔥 LLM 스트리밍 응답 생성 시작")
+        
+        user_input = state.get("current_message", BaseMessage(content="", type="human")).content
+        tool_calls = state.get("tool_calls", [])
+        parsed_intent = state.get("parsed_intent")
+        
+        logger.info(f"🔥 사용자 입력: {user_input}")
+        logger.info(f"🔥 파싱된 의도: {parsed_intent.intent_type if parsed_intent else 'None'}")
+        logger.info(f"🔥 도구 호출 수: {len(tool_calls)}")
+        
+        # 시스템 정보 응답 처리 (기존과 동일)
+        if parsed_intent and parsed_intent.intent_type in [IntentType.TOOL_LIST, IntentType.SERVER_STATUS]:
+            logger.info("🔥 시스템 정보 응답으로 기존 방식 사용")
+            return llm_generate_response(state)  # 시스템 정보는 기존 방식 사용
+        
+        logger.info("🔥 스트리밍 응답 생성 진행")
+        
+        # 일반 LLM 사용 (스트리밍 없이)
+        llm = get_llm()
+        
+        # 응답 생성 프롬프트 구성 (기존과 동일)
+        system_message = """당신은 친절하고 도움이 되는 AI 어시스턴트입니다.
+사용자의 질문에 대해 정확하고 유용한 답변을 제공해주세요.
+
+만약 외부 도구(MCP 도구)를 사용한 결과가 있다면, 그 결과를 바탕으로 답변해주세요.
+결과가 없거나 오류가 있다면, 일반적인 지식으로 최선의 답변을 제공해주세요.
+
+**응답 형식**: 
+- 마크다운 형식으로 답변을 작성해주세요
+- 적절한 제목(##), 목록(-), 강조(**텍스트**), 코드(`코드`) 등을 사용하세요
+- 답변은 한국어로 친근하고 이해하기 쉽게 작성해주세요
+- 정보가 많을 때는 구조화된 형태로 정리해주세요."""
+
+        messages = [SystemMessage(content=system_message)]
+        
+        # 사용자 메시지 추가
+        user_input = state.get("current_message", BaseMessage(content="", type="human")).content
+        
+        # 기본 사용자 컨텐츠 초기화
+        user_content = f"사용자 질문: {user_input}"
+        
+        # MCP 도구 호출 결과가 있다면 추가
+        if tool_calls:
+            user_content += "\n\n도구 실행 결과:"
+            for i, mcp_call in enumerate(tool_calls):
+                if mcp_call.is_successful():
+                    user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: {mcp_call.result}"
+                else:
+                    user_content += f"\n{i+1}. {mcp_call.server_name}.{mcp_call.tool_name}: 오류 - {mcp_call.error}"
+            
+            # 도구 호출 정보 요약 추가
+            user_content += "\n\n사용된 도구:"
+            for mcp_call in tool_calls:
+                user_content += f"\n- {mcp_call.server_name}.{mcp_call.tool_name}({mcp_call.arguments})"
+        
+        messages.append(HumanMessage(content=user_content))
+        
+        logger.info("🔥 LLM 응답 생성 중...")
+        # 먼저 전체 응답 생성
+        response = await llm.ainvoke(messages)
+        generated_response = response.content
+        
+        logger.info(f"🔥 LLM 응답 생성 완료, 길이: {len(generated_response)}")
+        logger.info(f"🔥 응답 일부: {generated_response[:100]}...")
+        
+        # 문자 단위 스트리밍으로 변경 (최소 단위)
+        current_text = ""
+        char_count = 0
+        
+        logger.info(f"🔥 문자 단위 스트리밍 시작, 총 {len(generated_response)}글자")
+        
+        for i, char in enumerate(generated_response):
+            current_text += char
+            char_count += 1
+            
+            # 1-2 글자마다 또는 구두점마다 partial_response 전송 (최소 단위)
+            should_send = (
+                char_count % 1 == 0 or  # 거의 모든 글자마다 (실시간 효과 극대화)
+                char in [' ', '\n', '.', ',', '!', '?', ';', ':', '-', ')', ']', '}'] or  # 구두점이나 공백
+                i == len(generated_response) - 1  # 마지막 글자
+            )
+            
+            if should_send:
+                # 10글자마다만 로깅 (로그 과부하 방지)
+                if i % 10 == 0 or i == len(generated_response) - 1:
+                    logger.info(f"🔥 partial_response 전송 중... ({i+1}/{len(generated_response)})")
+                    
+                from ..streaming import create_partial_response_message
+                partial_msg = create_partial_response_message(current_text.strip(), session_id)
+                
+                try:
+                    await sse_manager.send_to_session(session_id, partial_msg)
+                    # 성공 로그도 간소화
+                    if i % 20 == 0 or i == len(generated_response) - 1:
+                        logger.info(f"🔥 partial_response 전송 성공: {len(current_text.strip())} 글자")
+                except Exception as e:
+                    logger.error(f"🔥 partial_response 전송 실패: {e}")
+                
+                # 실시간 타이핑 효과를 위한 아주 짧은 지연
+                if char in [' ', '\n']:
+                    await asyncio.sleep(0.02)  # 공백/줄바꿈 시 짧은 지연
+                elif char in ['.', '!', '?']:
+                    await asyncio.sleep(0.1)   # 문장 끝 시 약간 긴 지연
+                else:
+                    await asyncio.sleep(0.01)  # 일반 글자는 극도로 짧은 지연
+        
+        logger.info("🔥 모든 partial_response 전송 완료")
+        
+        # 최종 응답으로 상태 업데이트
+        state["response"] = generated_response
+        state["success"] = True
+        update_workflow_step(state, "completed")
+        
+        # 최종 응답 메시지 전송
+        logger.info("🔥 final_response 전송 중...")
+        from ..streaming import create_final_response_message
+        final_msg = create_final_response_message(generated_response, session_id)
+        try:
+            await sse_manager.send_to_session(session_id, final_msg)
+            logger.info("🔥 final_response 전송 성공")
+        except Exception as e:
+            logger.error(f"🔥 final_response 전송 실패: {e}")
+        
+        logger.info("🔥 LLM 스트리밍 응답 생성 완료")
+        return state
+        
+    except Exception as e:
+        logger.error(f"🔥 LLM 스트리밍 응답 생성 오류: {e}")
+        import traceback
+        logger.error(f"🔥 스택 트레이스: {traceback.format_exc()}")
+        # 오류 시 기존 방식으로 폴백
+        return llm_generate_response(state) 

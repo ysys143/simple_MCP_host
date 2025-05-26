@@ -9,15 +9,24 @@ import json
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 import os
+import asyncio
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..adapters.enhanced_client import EnhancedMCPClient
 from ..workflows import create_workflow_executor, MCPWorkflowExecutor
+from ..streaming import (
+    get_sse_manager,
+    create_thinking_message,
+    create_acting_message,
+    create_final_response_message,
+    create_error_message,
+    create_tool_call_message
+)
 
 
 # 로깅 설정
@@ -303,5 +312,150 @@ def create_app() -> FastAPI:
             }
         else:
             return {"total_tools": 0, "tools": [], "tools_by_server": {}}
+    
+    @app.get("/debug/sse/status")
+    async def get_sse_status():
+        """SSE 연결 상태 조회 (디버깅용)"""
+        sse_manager = get_sse_manager()
+        return {
+            "connection_count": sse_manager.get_connection_count(),
+            "session_count": sse_manager.get_session_count(),
+            "sessions": list(sse_manager.session_connections.keys()),
+            "connections": list(sse_manager.connections.keys())
+        }
+    
+    @app.post("/debug/sse/send")
+    async def debug_send_message(request: dict):
+        """SSE 테스트 메시지 전송 (디버깅용)"""
+        session_id = request.get("session_id")
+        message_content = request.get("message", "테스트 메시지")
+        
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id가 필요합니다")
+        
+        sse_manager = get_sse_manager()
+        
+        # 테스트 메시지 생성
+        test_message = create_final_response_message(message_content, session_id)
+        
+        # 메시지 전송
+        sent_count = await sse_manager.send_to_session(session_id, test_message)
+        
+        return {
+            "success": True,
+            "sent_to_connections": sent_count,
+            "session_id": session_id,
+            "message": message_content
+        }
+    
+    @app.get("/api/v3/chat/stream")
+    async def stream_chat(request: Request):
+        """SSE 스트리밍 채팅 엔드포인트 (GET 방식으로 연결 생성)"""
+        session_id = request.query_params.get("session_id")
+        logger.info(f"SSE 연결 요청 - 세션 ID: {session_id}")
+        
+        sse_manager = get_sse_manager()
+        
+        async def event_generator():
+            try:
+                logger.info(f"SSE 연결 생성 시작 - 세션: {session_id}")
+                async with sse_manager.get_connection_stream(session_id) as (connection_id, stream):
+                    logger.info(f"SSE 연결 생성 완료 - 연결 ID: {connection_id}, 세션: {session_id}")
+                    async for message in stream:
+                        # heartbeat 메시지는 로깅하지 않음
+                        if "heartbeat" not in message:
+                            logger.info(f"SSE 메시지 전송 - 연결: {connection_id}, 내용: {message[:100]}...")
+                        yield message
+            except Exception as e:
+                logger.error(f"SSE 스트림 오류 - 세션: {session_id}, 오류: {e}")
+                error_msg = create_error_message(str(e), session_id or "unknown")
+                yield error_msg.to_sse_format()
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Cache-Control",
+                "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
+            }
+        )
+    
+    @app.post("/api/v3/chat/send")
+    async def send_chat_message(request: ChatRequest):
+        """SSE 채팅 메시지 전송 엔드포인트"""
+        if not request.session_id:
+            raise HTTPException(status_code=400, detail="세션 ID가 필요합니다")
+        
+        logger.info(f"메시지 전송 요청 - 세션: {request.session_id}, 메시지: {request.message}")
+        sse_manager = get_sse_manager()
+        
+        # 현재 SSE 연결 상태 확인
+        connection_count = sse_manager.get_connection_count()
+        session_count = sse_manager.get_session_count()
+        logger.info(f"현재 SSE 상태 - 연결: {connection_count}개, 세션: {session_count}개")
+        
+        try:
+            # 즉시 시작 메시지 전송
+            thinking_msg = create_thinking_message(
+                "요청을 접수했습니다. 분석을 시작합니다...",
+                request.session_id,
+                iteration=1
+            )
+            sent_count = await sse_manager.send_to_session(request.session_id, thinking_msg)
+            logger.info(f"시작 메시지 전송 - 수신자: {sent_count}개")
+            
+            # 컨텍스트 정보 생성
+            context = {
+                "available_servers": _app_instance.mcp_client.get_server_names(),
+                "available_tools": {
+                    "all": _app_instance.mcp_client.get_tool_names()
+                }
+            }
+            
+            # 분석 진행 메시지
+            await asyncio.sleep(0.1)  # 짧은 지연으로 실시간 효과
+            thinking_msg2 = create_thinking_message(
+                f"'{request.message}' 메시지의 의도를 분석하고 있습니다...",
+                request.session_id,
+                iteration=2
+            )
+            await sse_manager.send_to_session(request.session_id, thinking_msg2)
+            
+            # 스트리밍 워크플로우 실행
+            try:
+                result = await _app_instance.workflow_executor.execute_message_with_streaming(
+                    user_message=request.message,
+                    session_id=request.session_id,
+                    sse_manager=sse_manager,
+                    context=context,
+                    mcp_client=_app_instance.mcp_client
+                )
+                
+                logger.info(f"워크플로우 처리 완료 - 성공: {result.get('success')}")
+                return {"success": True, "message": "메시지가 처리되었습니다", "result": result}
+                
+            except Exception as workflow_error:
+                logger.error(f"워크플로우 처리 오류: {workflow_error}")
+                
+                # 워크플로우 오류 시 즉시 오류 메시지 전송
+                error_msg = create_error_message(
+                    f"처리 중 오류가 발생했습니다: {str(workflow_error)}",
+                    request.session_id
+                )
+                await sse_manager.send_to_session(request.session_id, error_msg)
+                
+                return {"success": False, "message": "워크플로우 오류", "error": str(workflow_error)}
+                
+        except Exception as e:
+            logger.error(f"메시지 전송 오류: {e}")
+            
+            # 즉시 오류 메시지 전송
+            error_msg = create_error_message(f"시스템 오류: {str(e)}", request.session_id)
+            await sse_manager.send_to_session(request.session_id, error_msg)
+            
+            raise HTTPException(status_code=500, detail=str(e))
     
     return app 

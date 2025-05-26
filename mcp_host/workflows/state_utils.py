@@ -22,6 +22,17 @@ def update_workflow_step(state: ChatState, step: str) -> None:
     state["step_count"] += 1
 
 
+def increment_step_count(state: ChatState) -> None:
+    """단계 카운터를 증가시킵니다
+    
+    Args:
+        state: 현재 채팅 상태
+    """
+    if "step_count" not in state:
+        state["step_count"] = 0
+    state["step_count"] += 1
+
+
 def set_error(state: ChatState, error_message: str) -> None:
     """오류 메시지를 상태에 설정합니다
     

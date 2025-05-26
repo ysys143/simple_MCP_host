@@ -16,7 +16,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph import StateGraph, END
 
 from ..models import ChatState
-from .llm_nodes import llm_parse_intent, llm_call_mcp_tool, llm_generate_response
+from .llm_nodes import llm_parse_intent, llm_call_mcp_tool, llm_generate_response, llm_generate_response_with_streaming
 
 
 # 로깅 설정
@@ -98,12 +98,14 @@ class MCPWorkflowExecutor:
             
             # 결과 정리
             parsed_intent = result.get("parsed_intent")
-            intent_type = parsed_intent.intent_type.value if parsed_intent else None
+            intent_type_value = None
+            if parsed_intent and hasattr(parsed_intent, "intent_type"):
+                intent_type_value = parsed_intent.intent_type.value if hasattr(parsed_intent.intent_type, "value") else str(parsed_intent.intent_type)
             
             response_data = {
                 "success": result.get("success", False),
                 "response": result.get("response", "응답을 생성할 수 없습니다."),
-                "intent_type": intent_type,
+                "intent_type": intent_type_value,
                 "tool_calls": [
                     {
                         "server": call.server_name,
@@ -125,6 +127,192 @@ class MCPWorkflowExecutor:
             
         except Exception as e:
             self._logger.error(f"워크플로우 실행 오류: {e}")
+            return {
+                "success": False,
+                "response": f"죄송합니다. 요청을 처리하는 중 오류가 발생했습니다: {e}",
+                "error": str(e),
+                "session_id": session_id
+            }
+    
+    async def execute_message_with_streaming(
+        self,
+        user_message: str,
+        session_id: str,
+        sse_manager = None,
+        context: Optional[Dict[str, Any]] = None,
+        mcp_client = None
+    ) -> Dict[str, Any]:
+        """SSE 스트리밍과 함께 사용자 메시지를 처리합니다
+        
+        Args:
+            user_message: 사용자 입력 메시지
+            session_id: 세션 식별자 
+            sse_manager: SSE 매니저 인스턴스
+            context: 추가 컨텍스트 정보
+            mcp_client: MCP 클라이언트 인스턴스
+            
+        Returns:
+            실행 결과를 포함한 딕셔너리
+        """
+        if not sse_manager:
+            # SSE 매니저가 없으면 기본 실행
+            return await self.execute_message(user_message, session_id, context, mcp_client)
+        
+        # SSE 스트리밍 import (순환 import 방지)
+        from ..streaming import (
+            create_thinking_message,
+            create_acting_message,
+            create_observing_message,
+            create_tool_call_message,
+            create_final_response_message,
+            create_error_message
+        )
+        
+        try:
+            self._logger.info(f"스트리밍 워크플로우 실행 시작 - 세션: {session_id}")
+            
+            # 1단계: 의도 분석 시작
+            thinking_msg = create_thinking_message(
+                f"'{user_message}' 요청을 분석하고 있습니다...",
+                session_id,
+                iteration=1
+            )
+            await sse_manager.send_to_session(session_id, thinking_msg)
+            
+            # 초기 상태 구성
+            initial_state: ChatState = {
+                "current_message": BaseMessage(content=user_message, type="human"),
+                "session_id": session_id,
+                "context": context or {},
+                "mcp_client": mcp_client,
+                "messages": [],
+                "parsed_intent": None,
+                "tool_calls": [],
+                "tool_results": [],
+                "response": "",
+                "success": False,
+                "error": None,
+                "step_count": 0,
+                "next_step": None
+            }
+            
+            # 의도 분석 실행
+            thinking_msg = create_thinking_message(
+                "요청 의도를 파악하고 적절한 도구를 선택하고 있습니다...",
+                session_id,
+                iteration=2
+            )
+            await sse_manager.send_to_session(session_id, thinking_msg)
+            
+            # 의도 분석 단계
+            state = llm_parse_intent(initial_state)
+            
+            # 의도 분석 결과 스트리밍
+            if state.get("parsed_intent"):
+                intent = state["parsed_intent"]
+                observing_msg = create_observing_message(
+                    f"의도 분석 완료: {intent.intent_type.value}",
+                    session_id,
+                    observation_data={"intent_type": intent.intent_type.value}
+                )
+                await sse_manager.send_to_session(session_id, observing_msg)
+                
+                # 도구 호출이 필요한 경우
+                if intent.intent_type.value in ["mcp_tool_call", "weather_query", "file_operation"]:
+                    acting_msg = create_acting_message(
+                        f"필요한 도구를 호출하고 있습니다...",
+                        session_id,
+                        action_details={"intent": intent.intent_type.value}
+                    )
+                    await sse_manager.send_to_session(session_id, acting_msg)
+                    
+                    # 도구 호출 실행
+                    state = await llm_call_mcp_tool(state)
+                    
+                    # 도구 호출 결과 스트리밍
+                    if state.get("tool_calls"):
+                        for tool_call in state["tool_calls"]:
+                            tool_msg = create_tool_call_message(
+                                tool_call.server_name,
+                                tool_call.tool_name,
+                                "completed" if tool_call.is_successful() else "failed",
+                                session_id
+                            )
+                            await sse_manager.send_to_session(session_id, tool_msg)
+                            
+                            observing_msg = create_observing_message(
+                                f"도구 실행 결과: {tool_call.result}",
+                                session_id,
+                                observation_data={
+                                    "tool": tool_call.tool_name,
+                                    "success": tool_call.is_successful()
+                                }
+                            )
+                            await sse_manager.send_to_session(session_id, observing_msg)
+            
+            # 응답 생성 단계
+            thinking_msg = create_thinking_message(
+                "수집된 정보를 바탕으로 최종 응답을 생성하고 있습니다...",
+                session_id,
+                iteration=3
+            )
+            await sse_manager.send_to_session(session_id, thinking_msg)
+            
+            # 토큰 단위 스트리밍 응답 생성
+            self._logger.info("🚀 스트리밍 응답 생성 함수 호출 시작")
+            try:
+                result = await llm_generate_response_with_streaming(state, sse_manager, session_id)
+                self._logger.info("🚀 스트리밍 응답 생성 함수 완료")
+            except Exception as e:
+                self._logger.error(f"🚀 스트리밍 응답 생성 함수 오류: {e}")
+                import traceback
+                self._logger.error(f"🚀 스택 트레이스: {traceback.format_exc()}")
+                raise
+            
+            # 최종 응답 생성 (스트리밍에서 이미 전송되므로 final_response는 생략)
+            parsed_intent = result.get("parsed_intent")
+            intent_type_value = None
+            if parsed_intent and hasattr(parsed_intent, "intent_type"):
+                intent_type_value = parsed_intent.intent_type.value if hasattr(parsed_intent.intent_type, "value") else str(parsed_intent.intent_type)
+            
+            response_data = {
+                "success": result.get("success", False),
+                "response": result.get("response", "응답을 생성할 수 없습니다."),
+                "intent_type": intent_type_value,
+                "tool_calls": [
+                    {
+                        "server": call.server_name,
+                        "tool": call.tool_name,
+                        "arguments": call.arguments,
+                        "result": call.result,
+                        "success": call.is_successful(),
+                        "execution_time_ms": call.execution_time_ms
+                    } for call in result.get("tool_calls", [])
+                ],
+                "session_id": session_id
+            }
+            
+            if not result.get("success"):
+                response_data["error"] = result.get("error", "알 수 없는 오류")
+                error_msg = create_error_message(
+                    response_data["error"],
+                    session_id
+                )
+                await sse_manager.send_to_session(session_id, error_msg)
+            
+            # 스트리밍에서 이미 final_response가 전송되므로 여기서는 생략
+            
+            self._logger.info(f"스트리밍 워크플로우 실행 완료 - 성공: {response_data['success']}")
+            return response_data
+            
+        except Exception as e:
+            self._logger.error(f"스트리밍 워크플로우 실행 오류: {e}")
+            
+            # 오류 메시지 스트리밍
+            if sse_manager:
+                error_msg = create_error_message(str(e), session_id)
+                await sse_manager.send_to_session(session_id, error_msg)
+            
             return {
                 "success": False,
                 "response": f"죄송합니다. 요청을 처리하는 중 오류가 발생했습니다: {e}",
