@@ -514,22 +514,22 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
     """토큰 단위 스트리밍과 함께 LLM 응답 생성"""
     try:
         increment_step_count(state)
-        logger.info("🔥 LLM 스트리밍 응답 생성 시작")
+        logger.info("LLM 스트리밍 응답 생성 시작")
         
         user_input = state.get("current_message", BaseMessage(content="", type="human")).content
         tool_calls = state.get("tool_calls", [])
         parsed_intent = state.get("parsed_intent")
         
-        logger.info(f"🔥 사용자 입력: {user_input}")
-        logger.info(f"🔥 파싱된 의도: {parsed_intent.intent_type if parsed_intent else 'None'}")
-        logger.info(f"🔥 도구 호출 수: {len(tool_calls)}")
+        logger.info(f"사용자 입력: {user_input}")
+        logger.info(f"파싱된 의도: {parsed_intent.intent_type if parsed_intent else 'None'}")
+        logger.info(f"도구 호출 수: {len(tool_calls)}")
         
         # 시스템 정보 응답 처리 (기존과 동일)
         if parsed_intent and parsed_intent.intent_type in [IntentType.TOOL_LIST, IntentType.SERVER_STATUS]:
-            logger.info("🔥 시스템 정보 응답으로 기존 방식 사용")
+            logger.info("시스템 정보 응답으로 기존 방식 사용")
             return llm_generate_response(state)  # 시스템 정보는 기존 방식 사용
         
-        logger.info("🔥 스트리밍 응답 생성 진행")
+        logger.info("스트리밍 응답 생성 진행")
         
         # 일반 LLM 사용 (스트리밍 없이)
         llm = get_llm()
@@ -571,19 +571,19 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         
         messages.append(HumanMessage(content=user_content))
         
-        logger.info("🔥 LLM 응답 생성 중...")
+        logger.info("LLM 응답 생성 중...")
         # 먼저 전체 응답 생성
         response = await llm.ainvoke(messages)
         generated_response = response.content
         
-        logger.info(f"🔥 LLM 응답 생성 완료, 길이: {len(generated_response)}")
-        logger.info(f"🔥 응답 일부: {generated_response[:100]}...")
+        logger.info(f"LLM 응답 생성 완료, 길이: {len(generated_response)}")
+        logger.info(f"응답 일부: {generated_response[:100]}...")
         
         # 문자 단위 스트리밍으로 변경 (최소 단위)
         current_text = ""
         char_count = 0
         
-        logger.info(f"🔥 문자 단위 스트리밍 시작, 총 {len(generated_response)}글자")
+        logger.info(f"문자 단위 스트리밍 시작, 총 {len(generated_response)}글자")
         
         for i, char in enumerate(generated_response):
             current_text += char
@@ -599,7 +599,7 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
             if should_send:
                 # 10글자마다만 로깅 (로그 과부하 방지)
                 if i % 10 == 0 or i == len(generated_response) - 1:
-                    logger.info(f"🔥 partial_response 전송 중... ({i+1}/{len(generated_response)})")
+                    logger.info(f"partial_response 전송 중... ({i+1}/{len(generated_response)})")
                     
                 from ..streaming import create_partial_response_message
                 partial_msg = create_partial_response_message(current_text.strip(), session_id)
@@ -608,9 +608,9 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
                     await sse_manager.send_to_session(session_id, partial_msg)
                     # 성공 로그도 간소화
                     if i % 20 == 0 or i == len(generated_response) - 1:
-                        logger.info(f"🔥 partial_response 전송 성공: {len(current_text.strip())} 글자")
+                        logger.info(f"partial_response 전송 성공: {len(current_text.strip())} 글자")
                 except Exception as e:
-                    logger.error(f"🔥 partial_response 전송 실패: {e}")
+                    logger.error(f"partial_response 전송 실패: {e}")
                 
                 # 실시간 타이핑 효과를 위한 아주 짧은 지연
                 if char in [' ', '\n']:
@@ -620,7 +620,7 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
                 else:
                     await asyncio.sleep(0.01)  # 일반 글자는 극도로 짧은 지연
         
-        logger.info("🔥 모든 partial_response 전송 완료")
+        logger.info("모든 partial_response 전송 완료")
         
         # 최종 응답으로 상태 업데이트
         state["response"] = generated_response
@@ -628,21 +628,21 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         update_workflow_step(state, "completed")
         
         # 최종 응답 메시지 전송
-        logger.info("🔥 final_response 전송 중...")
+        logger.info("final_response 전송 중...")
         from ..streaming import create_final_response_message
         final_msg = create_final_response_message(generated_response, session_id)
         try:
             await sse_manager.send_to_session(session_id, final_msg)
-            logger.info("🔥 final_response 전송 성공")
+            logger.info("final_response 전송 성공")
         except Exception as e:
-            logger.error(f"🔥 final_response 전송 실패: {e}")
+            logger.error(f"final_response 전송 실패: {e}")
         
-        logger.info("🔥 LLM 스트리밍 응답 생성 완료")
+        logger.info("LLM 스트리밍 응답 생성 완료")
         return state
         
     except Exception as e:
-        logger.error(f"🔥 LLM 스트리밍 응답 생성 오류: {e}")
+        logger.error(f"LLM 스트리밍 응답 생성 오류: {e}")
         import traceback
-        logger.error(f"🔥 스택 트레이스: {traceback.format_exc()}")
+        logger.error(f"스택 트레이스: {traceback.format_exc()}")
         # 오류 시 기존 방식으로 폴백
         return llm_generate_response(state) 

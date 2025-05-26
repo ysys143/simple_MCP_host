@@ -210,6 +210,12 @@ class MCPWorkflowExecutor:
             # 의도 분석 결과 스트리밍
             if state.get("parsed_intent"):
                 intent = state["parsed_intent"]
+                logger.info(f"의도 분석 결과: {intent.intent_type.value}")
+                logger.info(f"대상 서버: {intent.target_server}")
+                logger.info(f"대상 도구: {intent.target_tool}")
+                logger.info(f"매개변수: {intent.parameters}")
+                logger.info(f"MCP 액션 여부: {intent.is_mcp_action()}")
+                
                 observing_msg = create_observing_message(
                     f"의도 분석 완료: {intent.intent_type.value}",
                     session_id,
@@ -217,20 +223,25 @@ class MCPWorkflowExecutor:
                 )
                 await sse_manager.send_to_session(session_id, observing_msg)
                 
-                # 도구 호출이 필요한 경우
-                if intent.intent_type.value in ["mcp_tool_call", "weather_query", "file_operation"]:
+                # 도구 호출이 필요한 경우 - is_mcp_action() 메서드 사용
+                if intent.is_mcp_action():
+                    logger.info(f"🔧 MCP 도구 호출 필요 - 서버: {intent.target_server}, 도구: {intent.target_tool}")
+                    
                     acting_msg = create_acting_message(
                         f"필요한 도구를 호출하고 있습니다...",
                         session_id,
-                        action_details={"intent": intent.intent_type.value}
+                        action_details={"intent": intent.intent_type.value, "server": intent.target_server, "tool": intent.target_tool}
                     )
                     await sse_manager.send_to_session(session_id, acting_msg)
                     
                     # 도구 호출 실행
+                    logger.info(f"🔧 도구 호출 함수 실행 시작")
                     state = await llm_call_mcp_tool(state)
+                    logger.info(f"🔧 도구 호출 함수 실행 완료")
                     
                     # 도구 호출 결과 스트리밍
                     if state.get("tool_calls"):
+                        logger.info(f"🔧 도구 호출 결과 있음: {len(state['tool_calls'])}개")
                         for tool_call in state["tool_calls"]:
                             tool_msg = create_tool_call_message(
                                 tool_call.server_name,
@@ -249,6 +260,18 @@ class MCPWorkflowExecutor:
                                 }
                             )
                             await sse_manager.send_to_session(session_id, observing_msg)
+                    else:
+                        logger.warning(f"🔧 도구 호출 후에도 tool_calls가 비어있음")
+                else:
+                    logger.info(f"일반 대화 처리 - MCP 도구 호출 불필요")
+            else:
+                logger.warning(f"의도 분석 결과가 없음")
+                observing_msg = create_observing_message(
+                    "의도 분석에 실패했습니다. 일반 대화로 처리합니다.",
+                    session_id,
+                    observation_data={"intent_type": "failed"}
+                )
+                await sse_manager.send_to_session(session_id, observing_msg)
             
             # 응답 생성 단계
             thinking_msg = create_thinking_message(
