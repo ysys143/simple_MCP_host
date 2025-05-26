@@ -608,6 +608,81 @@ body {
 }
 
 .error-text {
+    color: #dc3545;
     font-weight: 500;
-    color: #dc2626;
+}
+
+/* Collapsible JSON 스타일 */
+.json-collapsible {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin: 8px 0;
+    overflow: hidden;
+}
+
+.json-header {
+    background: #f8f9fa;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 500;
+    font-size: 12px;
+    color: #495057;
+    border-bottom: 1px solid #dee2e6;
+    transition: background-color 0.2s ease;
+}
+
+.json-header:hover {
+    background: #e9ecef;
+}
+
+.json-header .toggle-icon {
+    font-size: 10px;
+    transition: transform 0.2s ease;
+    color: #6c757d;
+}
+
+.json-header.collapsed .toggle-icon {
+    transform: rotate(-90deg);
+}
+
+.json-content {
+    max-height: 300px;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.json-content.collapsed {
+    max-height: 0;
+}
+
+.json-content pre {
+    margin: 0;
+    background: #f8f9fa;
+    padding: 12px;
+    font-size: 11px;
+    overflow-x: auto;
+    border: none;
+    border-radius: 0;
+}
+
+/* 작은 JSON 블록 (3줄 이하)은 접기 기능 없이 항상 표시 */
+.json-small {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin: 8px 0;
+    overflow: hidden;
+}
+
+.json-small pre {
+    margin: 0;
+    background: #f8f9fa;
+    padding: 8px 12px;
+    font-size: 11px;
+    overflow-x: auto;
+    border: none;
+    border-radius: 0;
 } 

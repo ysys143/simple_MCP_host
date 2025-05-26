@@ -362,19 +362,31 @@ function handleToolCall(data) {
     const tool = data.metadata?.tool || 'unknown';
     const arguments = data.metadata?.arguments || {};
     
-    // 인수를 JSON 문자열로 변환
-    const argsJsonString = JSON.stringify(arguments, null, 0);
+    // JSON-RPC 요청 형태로 구성
+    const jsonRpcRequest = {
+        "jsonrpc": "2.0",
+        "id": Date.now(), // 간단한 ID 생성
+        "method": "tools/call",
+        "params": {
+            "name": tool,
+            "arguments": arguments
+        }
+    };
+    
+    // JSON을 보기 좋게 포맷팅
+    const formattedRequest = JSON.stringify(jsonRpcRequest, null, 2);
     
     // 도구 호출 박스 추가
     const toolCallDiv = document.createElement('div');
     toolCallDiv.className = 'tool-call executing';
     toolCallDiv.setAttribute('data-server', server);
     toolCallDiv.setAttribute('data-tool', tool);
+    toolCallDiv.setAttribute('data-id', jsonRpcRequest.id);
     
     toolCallDiv.innerHTML = `
-        🔧 서버명: ${server}, 도구명: ${tool}<br>
-        📋 파라미터: ${escapeHtml(argsJsonString)}
-        <span class="tool-status">⏳ 실행 중...</span>
+        <div style="font-weight: bold; margin-bottom: 8px;">🔧 MCP 도구 호출 요청 (서버: ${server})</div>
+        ${createCollapsibleJson(formattedRequest, 'JSON-RPC 요청')}
+        <div class="tool-status" style="margin-top: 8px;">⏳ 실행 중...</div>
     `;
     
     currentToolCallsContainer.appendChild(toolCallDiv);
@@ -401,22 +413,42 @@ function handleToolResult(data) {
             // 결과 내용 추출 (서버에서 "도구 실행 결과: " 접두사 제거)
             let resultText = data.content.replace('도구 실행 결과: ', '');
             
-            // 결과를 JSON 형태로 포맷팅 시도
-            let formattedResult;
-            try {
-                // 이미 JSON 문자열인지 확인
-                const parsed = JSON.parse(resultText);
-                formattedResult = JSON.stringify(parsed, null, 0);
-            } catch (e) {
-                // JSON이 아니면 간단한 객체로 래핑
-                formattedResult = JSON.stringify({"result": resultText}, null, 0);
+            // 요청 ID 가져오기
+            const requestId = executingToolCall.getAttribute('data-id') || Date.now();
+            
+            // JSON-RPC 응답 형태로 구성
+            const jsonRpcResponse = {
+                "jsonrpc": "2.0",
+                "id": parseInt(requestId),
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": resultText
+                        }
+                    ]
+                }
+            };
+            
+            // 에러인 경우 error 필드 사용
+            if (!success) {
+                delete jsonRpcResponse.result;
+                jsonRpcResponse.error = {
+                    "code": -1,
+                    "message": "Tool execution failed",
+                    "data": resultText
+                };
             }
             
-            // 기존 내용에서 "⏳ 실행 중..." 부분만 결과로 교체
+            // JSON을 보기 좋게 포맷팅
+            const formattedResponse = JSON.stringify(jsonRpcResponse, null, 2);
+            
+            // 기존 내용에서 "⏳ 실행 중..." 부분을 응답으로 교체
             const currentContent = executingToolCall.innerHTML;
             const updatedContent = currentContent.replace(
-                '<span class="tool-status">⏳ 실행 중...</span>',
-                `<br>📤 결과: ${success ? '✅' : '❌'} ${escapeHtml(formattedResult)}`
+                '<div class="tool-status" style="margin-top: 8px;">⏳ 실행 중...</div>',
+                `<div style="font-weight: bold; margin: 8px 0;">📤 MCP 도구 호출 응답</div>
+                ${createCollapsibleJson(formattedResponse, 'JSON-RPC 응답')}`
             );
             
             executingToolCall.innerHTML = updatedContent;
@@ -427,18 +459,34 @@ function handleToolResult(data) {
             
             let resultText = data.content.replace('도구 실행 결과: ', '');
             
-            // 결과를 JSON 형태로 포맷팅
-            let formattedResult;
-            try {
-                const parsed = JSON.parse(resultText);
-                formattedResult = JSON.stringify(parsed, null, 0);
-            } catch (e) {
-                formattedResult = JSON.stringify({"result": resultText}, null, 0);
+            // JSON-RPC 응답 형태로 구성
+            const jsonRpcResponse = {
+                "jsonrpc": "2.0",
+                "id": Date.now(),
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": resultText
+                        }
+                    ]
+                }
+            };
+            
+            if (!success) {
+                delete jsonRpcResponse.result;
+                jsonRpcResponse.error = {
+                    "code": -1,
+                    "message": "Tool execution failed",
+                    "data": resultText
+                };
             }
             
+            const formattedResponse = JSON.stringify(jsonRpcResponse, null, 2);
+            
             resultElement.innerHTML = `
-                🔧 도구명: ${toolName}<br>
-                📤 결과: ${success ? '✅' : '❌'} ${escapeHtml(formattedResult)}
+                <div style="font-weight: bold; margin-bottom: 8px;">📤 MCP 도구 호출 응답 (도구: ${toolName})</div>
+                ${createCollapsibleJson(formattedResponse, 'JSON-RPC 응답')}
             `;
             
             currentToolCallsContainer.appendChild(resultElement);
@@ -492,6 +540,64 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+function createCollapsibleJson(jsonString, title, isSmall = false) {
+    /**
+     * JSON 문자열을 접었다 폈다 할 수 있는 HTML로 변환
+     * @param {string} jsonString - JSON 문자열
+     * @param {string} title - 헤더에 표시할 제목
+     * @param {boolean} isSmall - 작은 JSON인지 여부 (3줄 이하)
+     * @returns {string} HTML 문자열
+     */
+    const escapedJson = escapeHtml(jsonString);
+    const lines = jsonString.split('\n').length;
+    
+    // 3줄 이하의 작은 JSON은 접기 기능 없이 표시
+    if (lines <= 3 || isSmall) {
+        return `
+            <div class="json-small">
+                <pre>${escapedJson}</pre>
+            </div>
+        `;
+    }
+    
+    // 큰 JSON은 접기 기능과 함께 표시 (기본적으로 접힌 상태)
+    const uniqueId = 'json_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    return `
+        <div class="json-collapsible">
+            <div class="json-header collapsed" onclick="toggleJsonCollapse('${uniqueId}')">
+                <span>${title}</span>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="json-content collapsed" id="${uniqueId}">
+                <pre>${escapedJson}</pre>
+            </div>
+        </div>
+    `;
+}
+
+function toggleJsonCollapse(elementId) {
+    /**
+     * JSON 블록의 접기/펼치기 상태를 토글
+     * @param {string} elementId - 토글할 요소의 ID
+     */
+    const content = document.getElementById(elementId);
+    const header = content.previousElementSibling;
+    
+    if (content.classList.contains('collapsed')) {
+        // 펼치기
+        content.classList.remove('collapsed');
+        header.classList.remove('collapsed');
+    } else {
+        // 접기
+        content.classList.add('collapsed');
+        header.classList.add('collapsed');
+    }
+}
+
+// 전역 스코프에서 접근 가능하도록 설정
+window.toggleJsonCollapse = toggleJsonCollapse;
 
 function renderMarkdown(text) {
     try {
@@ -768,8 +874,13 @@ function handleReActStep(data) {
     const iteration = data.metadata?.iteration || '';
     const iterationText = iteration ? ` ${iteration}` : '';
     
-    // acting 단계에서 도구 호출 정보 추출
-    let toolCallInfo = '';
+    // 단계 요소 생성
+    const stepDiv = document.createElement('div');
+    stepDiv.className = `react-step-item ${stepClass}`;
+    
+    let stepContent = '';
+    
+    // acting 단계에서 도구 호출 정보를 JSON-RPC 형태로 표시
     if (data.type === 'acting' && data.content) {
         const toolMatch = data.content.match(/행동 실행 중:\s*(.+)/);
         if (toolMatch) {
@@ -779,44 +890,116 @@ function handleReActStep(data) {
             
             if (toolMatchResult) {
                 const toolName = toolMatchResult[1];
-                const toolArgs = toolMatchResult[2];
-                toolCallInfo = ` → 🔧 ${toolName}(${escapeHtml(toolArgs)})`;
+                const toolArgsText = toolMatchResult[2];
+                
+                // 도구 인수를 파싱하여 JSON 객체로 변환 시도
+                let toolArgs = {};
+                try {
+                    // 간단한 파싱 (예: location="서울" 형태)
+                    const argMatches = toolArgsText.match(/(\w+)="([^"]+)"/g);
+                    if (argMatches) {
+                        argMatches.forEach(match => {
+                            const [, key, value] = match.match(/(\w+)="([^"]+)"/);
+                            toolArgs[key] = value;
+                        });
+                    } else {
+                        // 파싱 실패시 원본 텍스트 사용
+                        toolArgs = { "input": toolArgsText };
+                    }
+                } catch (e) {
+                    toolArgs = { "input": toolArgsText };
+                }
+                
+                // JSON-RPC 요청 형태로 구성
+                const jsonRpcRequest = {
+                    "jsonrpc": "2.0",
+                    "id": Date.now(),
+                    "method": "tools/call",
+                    "params": {
+                        "name": toolName,
+                        "arguments": toolArgs
+                    }
+                };
+                
+                const formattedRequest = JSON.stringify(jsonRpcRequest, null, 2);
+                
+                stepContent = `
+                    <div style="margin-top: 8px;">
+                        <div style="font-weight: bold; margin-bottom: 4px;">🔧 MCP 도구 호출 요청</div>
+                        ${createCollapsibleJson(formattedRequest, 'JSON-RPC 요청')}
+                    </div>
+                `;
+            } else {
+                stepContent = escapeHtml(data.content);
             }
+        } else {
+            stepContent = escapeHtml(data.content);
         }
     }
-    
-    // observing 단계에서 도구 결과 정보 추출
-    let toolResultInfo = '';
-    if (data.type === 'observing' && data.content) {
+    // observing 단계에서 도구 결과를 JSON-RPC 형태로 표시
+    else if (data.type === 'observing' && data.content) {
         const successMatch = data.content.match(/도구 '(\w+)' 실행 성공:\s*(.+)/);
         const failMatch = data.content.match(/도구 '(\w+)' 실행 실패:\s*(.+)/);
         
-        if (successMatch) {
-            const result = successMatch[2];
-            toolResultInfo = ` → ✅ ${escapeHtml(result)}`;
-        } else if (failMatch) {
-            const error = failMatch[2];
-            toolResultInfo = ` → ❌ ${escapeHtml(error)}`;
+        if (successMatch || failMatch) {
+            const isSuccess = !!successMatch;
+            const toolName = isSuccess ? successMatch[1] : failMatch[1];
+            const resultText = isSuccess ? successMatch[2] : failMatch[2];
+            
+            // JSON-RPC 응답 형태로 구성
+            const jsonRpcResponse = {
+                "jsonrpc": "2.0",
+                "id": Date.now(),
+            };
+            
+            if (isSuccess) {
+                jsonRpcResponse.result = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": resultText
+                        }
+                    ]
+                };
+            } else {
+                jsonRpcResponse.error = {
+                    "code": -1,
+                    "message": "Tool execution failed",
+                    "data": resultText
+                };
+            }
+            
+            const formattedResponse = JSON.stringify(jsonRpcResponse, null, 2);
+            
+            stepContent = `
+                <div style="margin-top: 8px;">
+                    <div style="font-weight: bold; margin-bottom: 4px;">📤 MCP 도구 호출 응답 (도구: ${toolName})</div>
+                    ${createCollapsibleJson(formattedResponse, 'JSON-RPC 응답')}
+                </div>
+            `;
+        } else {
+            stepContent = escapeHtml(data.content);
         }
     }
-    
-    // 단계 요소 생성
-    const stepDiv = document.createElement('div');
-    stepDiv.className = `react-step-item ${stepClass}`;
-    
-    // 사고 과정의 경우 내용을 간략하게 표시
-    let displayContent = data.content;
-    if (data.type === 'thinking' && data.content.includes('사고:')) {
+    // thinking 단계는 간략하게 표시
+    else if (data.type === 'thinking' && data.content.includes('사고:')) {
         const thoughtMatch = data.content.match(/사고:\s*(.+)/);
         if (thoughtMatch) {
-            displayContent = thoughtMatch[1].substring(0, 100) + (thoughtMatch[1].length > 100 ? '...' : '');
+            const thoughtText = thoughtMatch[1];
+            stepContent = escapeHtml(thoughtText.substring(0, 100) + (thoughtText.length > 100 ? '...' : ''));
+        } else {
+            stepContent = escapeHtml(data.content);
         }
+    }
+    // 기타 단계는 그대로 표시
+    else {
+        stepContent = escapeHtml(data.content);
     }
     
     stepDiv.innerHTML = `
         <span class="step-icon">${stepIcon}</span>
-        <span class="step-title">${stepTitle}${iterationText}:</span>
-        <span class="step-content">${escapeHtml(displayContent)}${toolCallInfo}${toolResultInfo}</span>
+        <span class="step-title">${stepTitle}:</span>
+        <div class="step-content">${stepContent}</div>
     `;
     
     currentReActContainer.appendChild(stepDiv);

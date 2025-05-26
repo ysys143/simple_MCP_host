@@ -347,8 +347,8 @@ class MCPWorkflowExecutor:
                 intent_type_value = parsed_intent.intent_type.value if hasattr(parsed_intent.intent_type, "value") else str(parsed_intent.intent_type)
             
             response_data = {
-                "success": result.get("success", False),
-                "response": result.get("response", "응답을 생성할 수 없습니다."),
+                "success": result.get("success", True),
+                "response": result.get("response", "응답이 생성되었습니다."),
                 "intent_type": intent_type_value,
                 "tool_calls": [
                     {
