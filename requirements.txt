@@ -10,4 +10,7 @@ typing-extensions>=4.8.0
 pytest
 pytest-asyncio
 pytest-mock
-langchain-mcp-adapters 
+langchain-mcp-adapters
+arize-phoenix
+openinference-instrumentation-langchain
+python-dotenv 

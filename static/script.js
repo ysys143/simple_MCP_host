@@ -18,6 +18,7 @@ let currentToolCallsContainer = null; // 도구 호출 컨테이너 추적
 let currentReActContainer = null; // ReAct 과정 컨테이너 추적
 let currentRequestReActMode = false; // 현재 요청의 ReAct 모드 상태 추적
 let timeoutId = null; // 타임아웃 ID 저장
+let isPhoenixLinkActivatedByChat = false; // Phoenix UI 링크 활성화 상태 추적 (채팅 기반)
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
@@ -28,6 +29,40 @@ document.addEventListener('DOMContentLoaded', function() {
     chatContainer = document.getElementById('chatContainer');
     messageInput = document.getElementById('messageInput');
     sendButton = document.getElementById('sendButton');
+    
+    // Phoenix UI 링크 설정
+    const phoenixUILink = document.getElementById('phoenixUILink');
+    if (phoenixUILink) {
+        fetch('/api/config')
+            .then(response => response.json())
+            .then(config => {
+                if (config.is_phoenix_enabled && config.phoenix_base_url) {
+                    phoenixUILink.href = config.phoenix_base_url;
+                    // phoenixUILink.style.display = 'flex'; // CSS에서 .nav-links가 이미 display:flex를 가짐
+                    // HTML에 phoenix-link-inactive 클래스가 이미 적용되어 있으므로, 여기서는 특별히 추가/제거할 필요 없음
+                    // 만약 HTML에 없다면 여기서 classList.add('phoenix-link-inactive')를 할 수 있음
+
+                    // (선택 사항) 프로젝트 이름 표시
+                    const projectInfo = document.createElement('span');
+                    projectInfo.textContent = `(Project: ${config.project_name || 'default'})`;
+                    projectInfo.style.fontSize = '0.7rem'; // 로고/메뉴보다 작게
+                    projectInfo.style.marginLeft = '8px'; // 링크 텍스트와 간격
+                    projectInfo.style.color = '#bbb'; // 약간 흐리게
+                    // projectInfo.style.alignSelf = 'center'; // 부모가 flex container가 아니므로 불필요, a 태그의 align-items가 처리
+                    
+                    phoenixUILink.appendChild(projectInfo); // a 태그의 자식으로 추가
+
+                } else {
+                    phoenixUILink.style.display = 'none'; 
+                }
+            })
+            .catch(error => {
+                console.error('Phoenix 설정을 가져오는 중 오류 발생:', error);
+                phoenixUILink.style.display = 'none';
+            });
+    } else {
+        console.warn("Phoenix UI 링크 요소를 찾을 수 없습니다. (ID: phoenixUILink)");
+    }
     
     // 키보드 이벤트 리스너 등록
     setupEventListeners();
@@ -334,6 +369,7 @@ function handlePartialResponse(data) {
 }
 
 function handleFinalResponse(data) {
+    console.log('[handleFinalResponse] Received final response. Data:', data);
     if (currentPartialMessage) {
         // 기존 스트리밍 메시지를 최종 응답으로 변경
         currentPartialMessage.className = 'message assistant';
@@ -385,13 +421,21 @@ function handleFinalResponse(data) {
     
     // ReAct 최종 답변인 경우 ReAct 컨테이너 종료
     if (data.metadata && data.metadata.react_final) {
-        currentReActContainer = null;
+        if (currentReActContainer) {
+            currentReActContainer.classList.remove('streaming');
+            currentReActContainer = null;
+        }
+        currentRequestReActMode = false; // ReAct 모드 상태 초기화
     }
     
     // 도구 호출 컨테이너 초기화
     currentToolCallsContainer = null;
     
     scrollToBottom();
+
+    // 최종 응답 수신 시 Phoenix UI 링크 활성화 시도
+    console.log('[handleFinalResponse] Attempting to activate Phoenix UI link...');
+    activatePhoenixUILinkAfterChat();
 }
 
 function handleToolCall(data) {
@@ -826,6 +870,10 @@ function sendMessage() {
     forceClearInput();
     autoResize();
     
+    // 사용자 메시지 전송 시 Phoenix UI 링크 활성화 시도
+    console.log('[sendMessage] Attempting to activate Phoenix UI link...');
+    activatePhoenixUILinkAfterChat();
+    
     // SSE는 단방향이므로 HTTP POST로 메시지 전송
     fetch('/api/v3/chat/send', {
         method: 'POST',
@@ -1060,4 +1108,35 @@ function handleReActStep(data) {
     
     currentReActContainer.appendChild(stepDiv);
     scrollToBottom();
+}
+
+// Phoenix UI 링크 활성화 함수 (채팅 기반)
+function activatePhoenixUILinkAfterChat() {
+    console.log('[activatePhoenixUILinkAfterChat] Function called.');
+    if (isPhoenixLinkActivatedByChat) {
+        console.log('[activatePhoenixUILinkAfterChat] Link already activated by chat. Skipping.');
+        return; // 이미 활성화되었으면 중복 실행 방지
+    }
+
+    const phoenixUILink = document.getElementById('phoenixUILink');
+    if (phoenixUILink) {
+        console.log('[activatePhoenixUILinkAfterChat] Phoenix UI link element found.');
+        console.log('[activatePhoenixUILinkAfterChat] Current display style:', phoenixUILink.style.display);
+        console.log('[activatePhoenixUILinkAfterChat] Current classList before change:', phoenixUILink.classList.toString());
+
+        // 서버 설정에 의해 Phoenix UI가 활성화된 경우에만 채팅 기반 활성화 로직 적용
+        // (기존 /api/config fetch 로직은 그대로 유지되며, 그 결과에 따라 기본 display 상태가 결정됨)
+        // 여기서 하는 일은 채팅이 시작되면 .phoenix-link-inactive 클래스만 제거하는 것.
+        if (phoenixUILink.style.display !== 'none') { // 링크가 숨겨져 있지 않은 경우에만 (서버 설정에 의해 활성화된 경우)
+            phoenixUILink.classList.remove('phoenix-link-inactive');
+            isPhoenixLinkActivatedByChat = true;
+            console.log('[activatePhoenixUILinkAfterChat] "phoenix-link-inactive" class removed.');
+            console.log('[activatePhoenixUILinkAfterChat] isPhoenixLinkActivatedByChat set to true.');
+            console.log('[activatePhoenixUILinkAfterChat] Current classList after change:', phoenixUILink.classList.toString());
+        } else {
+            console.log('[activatePhoenixUILinkAfterChat] Link is hidden (display: none), not activating.');
+        }
+    } else {
+        console.error('[activatePhoenixUILinkAfterChat] Phoenix UI link element NOT found!');
+    }
 } 

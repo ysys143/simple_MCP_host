@@ -4,27 +4,122 @@
     box-sizing: border-box;
 }
 
+/* Navigation Bar Styles */
+.navbar {
+    background-color: #333; /* 어두운 배경색 */
+    height: 60px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 1.2rem;
+    position: sticky; /* 상단에 고정 */
+    top: 0;
+    z-index: 999; /* 다른 요소 위에 표시되도록 */
+    width: 100%;
+    padding: 0 20px; /* 좌우 패딩 */
+    box-sizing: border-box; /* 패딩과 보더가 너비에 포함되도록 */
+    flex-shrink: 0; /* body가 column일 때 navbar 높이가 줄어들지 않도록 */
+}
+
+.navbar-container {
+    display: flex;
+    justify-content: space-between; /* 로고와 메뉴를 양 끝으로 */
+    height: 60px;
+    z-index: 1;
+    width: 100%;
+    max-width: 1300px; /* 최대 너비 제한 */
+    padding: 0 10px; /* 컨테이너 내부 좌우 패딩 */
+}
+
+.navbar-logo {
+    color: #fff;
+    justify-self: start;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 2rem;
+    display: flex;
+    align-items: center;
+    white-space: nowrap; /* 줄바꿈 방지 */
+}
+
+.nav-menu {
+    display: flex;
+    align-items: center;
+    list-style: none;
+    text-align: center;
+    margin: 0; /* 기본 마진 제거 */
+    padding: 0; /* 기본 패딩 제거 */
+}
+
+.nav-item {
+    height: 60px;
+    display: flex; /* 자식 요소(nav-links, projectInfo)를 flex 아이템으로 만듦 */
+    align-items: center; /* 수직 중앙 정렬 */
+}
+
+.nav-links {
+    color: #fff;
+    display: flex; /* 내부 텍스트/아이콘 정렬을 위해 */
+    align-items: center;
+    text-decoration: none;
+    padding: 0 1rem; /* 좌우 패딩은 유지 */
+    height: 100%;
+    transition: all 0.2s ease-out;
+}
+
+.nav-links:hover {
+    color: #667eea; /* 호버 시 색상 변경 (기존 테마 색상과 유사하게) */
+    border-bottom: 3px solid #667eea;
+}
+
+/* Phoenix UI 링크 초기 비활성 스타일 */
+#phoenixUILink.phoenix-link-inactive {
+    /* display: none !important; /* 다른 스타일에 의해 보이더라도 강제로 숨김 */
+    opacity: 0.2; /* 활성화 전 투명도 */
+    pointer-events: none; /* 클릭 비활성화 */
+    /* 기본적으로 display:flex는 유지되므로, 초기 숨김은 JS에서 처리 */
+}
+
+/* Phoenix UI 링크 활성화 시 스타일 (기본 상태에 병합 또는 별도 클래스) */
+#phoenixUILink {
+    /* 기졸 .nav-links 스타일 상속 */
+    font-size: 2rem; /* MCP Host 로고와 동일한 크기로 설정 */
+    transition: opacity 0.3s ease, text-shadow 0.3s ease; /* 부드러운 전환 효과 */
+    white-space: nowrap; /* 줄바꿈 방지 */
+}
+
+#phoenixUILink:not(.phoenix-link-inactive) {
+    opacity: 1; /* 활성화 시 완전 불투명 */
+    pointer-events: auto; /* 클릭 활성화 */
+    text-shadow: 0 0 8px hotpink, 0 0 12px hotpink; /* 분홍색 네온 효과 */
+    /* 예시: border: 1px solid hotpink; padding: 3px 6px; border-radius: 5px; */
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    flex-direction: column; /* 자식 요소들을 세로로 배치 */
+    align-items: stretch; /* 자식 요소들이 교차 축(가로)으로 늘어나도록 */
+    padding: 0; /* body 전체 패딩 제거 */
 }
 
 .container {
-    width: 100%;
-    max-width: 900px;
+    width: 100%; /* align-items: stretch에 의해 이미 100%가 되지만 명시적으로 추가 */
+    max-width: 900px; /* 기존 최대 너비는 유지하되, 전체 화면 너비에서는 중앙 정렬 필요 */
+    margin-left: auto; /* 중앙 정렬을 위해 추가 */
+    margin-right: auto; /* 중앙 정렬을 위해 추가 */
     background: white;
     border-radius: 20px;
     box-shadow: 0 15px 35px rgba(0,0,0,0.2);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    height: 80vh;
-    min-height: 600px;
+    height: auto; /* 기존 80vh에서 변경, 내용에 따라 늘어나도록 */
+    min-height: 600px; /* 최소 높이는 유지 */
+    margin-top: 0; /* navbar가 sticky가 아니거나, body가 flex가 아니면 필요 */
+    flex-grow: 1; /* 남은 공간을 모두 차지하도록 */
 }
 
 .header {

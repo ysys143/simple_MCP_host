@@ -167,9 +167,13 @@ async def lifespan(app: FastAPI):
     await _app_instance.shutdown()
 
 
-def create_app() -> FastAPI:
+def create_app(phoenix_enabled: bool, phoenix_url: Optional[str]) -> FastAPI:
     """FastAPI 애플리케이션 생성 팩토리 함수
     
+    Args:
+        phoenix_enabled: Phoenix 활성화 여부
+        phoenix_url: Phoenix UI URL (활성화된 경우)
+
     Returns:
         설정된 FastAPI 애플리케이션
     """
@@ -221,6 +225,24 @@ def create_app() -> FastAPI:
                 "status": "initializing",
                 "message": "서비스 초기화 중입니다"
             }
+    
+    # Phoenix 설정 응답 모델
+    class PhoenixConfigResponse(BaseModel):
+        is_phoenix_enabled: bool
+        phoenix_base_url: Optional[str] = None
+        project_name: Optional[str] = None # 프로젝트 이름도 전달
+
+    @app.get("/api/config", response_model=PhoenixConfigResponse)
+    async def get_phoenix_config():
+        """Phoenix 설정 정보 반환 엔드포인트"""
+        if phoenix_enabled:
+            return PhoenixConfigResponse(
+                is_phoenix_enabled=True,
+                phoenix_base_url=phoenix_url, # main.py에서 전달받은 URL 사용
+                project_name="mcp_host_traces" # 고정된 프로젝트 이름
+            )
+        else:
+            return PhoenixConfigResponse(is_phoenix_enabled=False)
     
     @app.post("/chat", response_model=ChatResponse)
     async def chat_endpoint(request: ChatRequest):

@@ -16,12 +16,22 @@
     <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🤖 LangGraph MCP 호스트</h1>
-            <p>langchain-mcp-adapters + LangGraph 워크플로우</p>
+    <nav class="navbar">
+        <div class="navbar-container">
+            <a href="/" class="navbar-logo">🤖 MCP Host</a>
+            <div class="navbar-title-group" style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                <p style="margin: 0; color: white; font-size: 0.8rem;">langchain-mcp-adapters + LangGraph Workflow & ReAct Agent</p>
+            </div>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a href="http://127.0.0.1:6006" class="nav-links phoenix-link-inactive" target="_blank" id="phoenixUILink">Phoenix UI</a>
+                </li>
+                <!-- 다른 네비게이션 항목 추가 가능 -->
+            </ul>
         </div>
-        
+    </nav>
+    <div class="container">
         <div class="status-bar">
             <div id="connectionStatus" class="status disconnected">
                 <div class="status-dot"></div>
