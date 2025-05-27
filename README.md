@@ -8,17 +8,17 @@
 
 
 #### 📹 기본 사용법 데모
-<a href="https://youtu.be/mt0o0Dx6jOU" target="_blank">기본 사용법 데모 영상 보기</a>
+[![기본 사용법 데모](https://img.youtube.com/vi/mt0o0Dx6jOU/maxresdefault.jpg)](https://youtu.be/mt0o0Dx6jOU)
 
 *기본적인 웹 UI 사용법과 AI와의 대화 과정을 보여주는 데모 영상입니다.*
 
 #### 📹 ReAct 모드 날씨 검색 데모
-<a href="https://youtu.be/yQQ5yKAIMTg" target="_blank">ReAct 모드 사용법 데모 영상 보기</a>
+[![ReAct 모드 데모](https://img.youtube.com/vi/yQQ5yKAIMTg/maxresdefault.jpg)](https://youtu.be/yQQ5yKAIMTg)
 
 *ReAct 패턴을 통한 복합적인 날씨 검색 및 리포트 생성 과정을 보여주는 데모 영상입니다. Think → Act → Observe 사이클을 통해 단계별로 정보를 수집하고 분석합니다.*
 
 #### 📹 Phoenix 모니터링 데모
-<a href="https://youtu.be/YWJDD2ldvsw" target="_blank">ReAct 모드 사용법 데모 영상 보기</a>
+[![Phoenix 모니터링 데모](https://img.youtube.com/vi/YWJDD2ldvsw/maxresdefault.jpg)](https://youtu.be/YWJDD2ldvsw)
 
 *Phoenix UI를 통한 AI 애플리케이션 추적 및 성능 분석 과정을 보여주는 데모 영상입니다.*
 
