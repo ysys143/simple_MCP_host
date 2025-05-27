@@ -198,7 +198,7 @@ class MCPWorkflowExecutor:
             session_id: 세션 ID (선택적)
             user_id: 사용자 ID (선택적)
             context: 추가 컨텍스트 정보 (선택적)
-            mcp_client: Enhanced MCP Client 인스턴스 (선택적)
+            mcp_client: MCP Client 인스턴스 (선택적)
             
         Returns:
             처리 결과 딕셔너리

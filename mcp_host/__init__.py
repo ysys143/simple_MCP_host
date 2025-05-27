@@ -11,7 +11,7 @@ __author__ = "MCP Host Team"
 
 # 현재 구현된 모듈들 import
 from .config import MCPHostSettings, get_settings, MCPConfigManager, create_config_manager
-from .adapters import EnhancedMCPClient
+from .adapters import MCPClient
 from .workflows import create_workflow_executor
 from .models import ChatState, IntentType, ParsedIntent, MCPToolCall, MessageRole, ChatMessage
 
@@ -28,7 +28,7 @@ __all__ = [
     "MCPConfigManager",
     "create_config_manager",
     # 클라이언트 관리
-    "EnhancedMCPClient",
+    "MCPClient",
     # TODO: 다음 단계에서 추가
     # "MCPProtocol",
     # "MCPHostService", 

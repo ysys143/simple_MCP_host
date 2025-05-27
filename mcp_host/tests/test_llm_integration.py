@@ -18,13 +18,13 @@ async def test_llm_workflow():
     
     try:
         from mcp_host.workflows.executor import create_workflow_executor
-        from mcp_host.adapters.enhanced_client import create_enhanced_client
+        from mcp_host.adapters.client import create_client
         from mcp_host.config import create_config_manager
         
         # MCP 클라이언트 초기화
         print("1. MCP 클라이언트 초기화...")
         config_manager = create_config_manager()
-        client = create_enhanced_client(config_manager)
+        client = create_client(config_manager)
         await client.initialize("mcp_servers.json")
         print(f"✅ MCP 클라이언트 준비 완료: {client.get_server_count()}개 서버, {len(client.get_tools())}개 도구")
         

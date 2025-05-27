@@ -93,6 +93,28 @@ class SSEManager:
             if session_id is None:
                 session_id = f"session_{uuid.uuid4().hex[:8]}"
             
+            # 동일 세션의 기존 연결 정리 (중복 연결 방지)
+            if session_id in self.session_connections:
+                existing_connections = self.session_connections[session_id].copy()
+                self._logger.info(f"세션 {session_id}의 기존 연결 {len(existing_connections)}개 정리 중...")
+                
+                for existing_conn_id in existing_connections:
+                    if existing_conn_id in self.connections:
+                        existing_conn = self.connections[existing_conn_id]
+                        
+                        # 기존 연결에 세션 종료 메시지 전송
+                        end_message = create_session_end_message(session_id)
+                        await existing_conn.send_message(end_message)
+                        
+                        # 기존 연결 종료
+                        existing_conn.close()
+                        del self.connections[existing_conn_id]
+                        
+                        self._logger.info(f"기존 연결 정리 완료: {existing_conn_id}")
+                
+                # 세션 연결 목록 초기화
+                self.session_connections[session_id].clear()
+            
             # 연결 ID 생성
             connection_id = f"conn_{uuid.uuid4().hex[:8]}"
             

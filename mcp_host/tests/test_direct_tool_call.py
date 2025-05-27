@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """직접 도구 호출 테스트
 
-워크플로우를 거치지 않고 Enhanced Client로 직접 도구 호출 결과를 확인합니다.
+워크플로우를 거치지 않고 Client로 직접 도구 호출 결과를 확인합니다.
 """
 
 import asyncio
-from mcp_host.adapters.enhanced_client import EnhancedMCPClient
+from mcp_host.adapters.client import MCPClient
 
 async def test_direct_tool_calls():
     print("=== 직접 도구 호출 테스트 ===")
     
-    client = EnhancedMCPClient()
+    client = MCPClient()
     
     try:
         await client.initialize("mcp_servers.json")

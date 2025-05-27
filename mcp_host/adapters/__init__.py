@@ -5,6 +5,6 @@ langchain-mcp-adapters 통합 모듈
 더 간단하고 표준화된 MCP 클라이언트를 제공합니다.
 """
 
-from .enhanced_client import EnhancedMCPClient
+from .client import MCPClient
 
-__all__ = ["EnhancedMCPClient"] 
+__all__ = ["MCPClient"] 

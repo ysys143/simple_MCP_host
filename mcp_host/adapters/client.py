@@ -15,7 +15,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 json_rpc_logger = logging.getLogger('json_rpc')
 
 
-class EnhancedMCPClient:
+class MCPClient:
     """langchain-mcp-adapters 기반 향상된 MCP 클라이언트
     
     MultiServerMCPClient를 사용하여 실제 MCP 서버들과 연결하고
@@ -52,7 +52,7 @@ class EnhancedMCPClient:
             # 도구 로드 (올바른 방법 사용)
             await self._load_tools()
             
-            self._logger.info(f"Enhanced MCP Client 초기화 완료: {len(self._tools)}개 도구 로드됨")
+            self._logger.info(f"MCP Client 초기화 완료: {len(self._tools)}개 도구 로드됨")
             
         except Exception as e:
             self._logger.error(f"클라이언트 초기화 실패: {e}")
@@ -101,7 +101,7 @@ class EnhancedMCPClient:
             Exception: 도구 실행 실패
         """
         # <<< 추가된 로깅 시작 >>>
-        self._logger.info(f"[EnhancedMCPClient.call_tool ENTRY] server_name: {server_name}, tool_name: {tool_name}, received arguments: {arguments}, type: {type(arguments)}")
+        self._logger.info(f"[MCPClient.call_tool ENTRY] server_name: {server_name}, tool_name: {tool_name}, received arguments: {arguments}, type: {type(arguments)}")
         # <<< 추가된 로깅 끝 >>>
 
         # JSON-RPC 요청 객체 생성 (로깅용)
@@ -131,7 +131,7 @@ class EnhancedMCPClient:
             self._logger.info(f"실제 MCP 도구 호출: {server_name}.{tool_name}") # 기존 내부 로깅
             
             # <<< 추가된 로깅 시작 >>>
-            self._logger.info(f"[EnhancedMCPClient.call_tool PRE-INVOKE] Calling tool.ainvoke with arguments: {arguments}, type: {type(arguments)}")
+            self._logger.info(f"[MCPClient.call_tool PRE-INVOKE] Calling tool.ainvoke with arguments: {arguments}, type: {type(arguments)}")
             # <<< 추가된 로깅 끝 >>>
             result = await tool.ainvoke(arguments) 
             
@@ -194,7 +194,7 @@ class EnhancedMCPClient:
                 self._client = None
                 self._tools = []
                 self._tools_dict = {}
-                self._logger.info("Enhanced MCP Client 연결 해제 완료")
+                self._logger.info("MCP Client 연결 해제 완료")
                 
         except Exception as e:
             self._logger.warning(f"연결 해제 중 오류: {e}")
@@ -253,10 +253,10 @@ class EnhancedMCPClient:
         await self.close()
 
 
-def create_enhanced_client() -> EnhancedMCPClient:
+def create_client() -> MCPClient:
     """향상된 MCP 클라이언트 팩토리 함수
     
     Returns:
-        EnhancedMCPClient 인스턴스
+        MCPClient 인스턴스
     """
-    return EnhancedMCPClient() 
+    return MCPClient() 

@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ..adapters.enhanced_client import EnhancedMCPClient
+from ..adapters.client import MCPClient
 from ..workflows import create_workflow_executor, MCPWorkflowExecutor
 from ..streaming import (
     get_sse_manager,
@@ -61,7 +61,7 @@ class MCPHostApp:
     
     def __init__(self):
         """애플리케이션 초기화"""
-        self.mcp_client: Optional[EnhancedMCPClient] = None
+        self.mcp_client: Optional[MCPClient] = None
         self.workflow_executor: Optional[MCPWorkflowExecutor] = None
         self._logger = logging.getLogger(__name__)
     
@@ -75,8 +75,8 @@ class MCPHostApp:
             await initialize_session_manager()
             self._logger.info("세션 관리자 초기화 완료")
             
-            # Enhanced MCP Client 초기화 (환경변수 설정 모듈 사용)
-            self.mcp_client = EnhancedMCPClient()
+            # MCP Client 초기화 (환경변수 설정 모듈 사용)
+            self.mcp_client = MCPClient()
             # MCP 클라이언트 초기화 (환경변수 설정 모듈에서 설정 파일 경로 가져오기)
             from ..config.env_config import get_settings
             settings = get_settings()

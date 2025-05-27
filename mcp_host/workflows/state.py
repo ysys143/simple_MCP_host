@@ -29,7 +29,7 @@ def create_initial_state(
         user_message: 사용자 메시지
         session_id: 세션 ID (선택적)
         user_id: 사용자 ID (선택적)
-        mcp_client: Enhanced MCP Client 인스턴스 (선택적)
+        mcp_client: MCP Client 인스턴스 (선택적)
         react_mode: ReAct 모드 활성화 여부 (선택적)
     
     Returns:

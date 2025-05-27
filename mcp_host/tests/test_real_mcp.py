@@ -9,7 +9,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from mcp_host.adapters.enhanced_client import create_enhanced_client
+from mcp_host.adapters.client import create_client
 from mcp_host.config import create_config_manager
 
 
@@ -18,7 +18,7 @@ async def test_real_mcp():
     print('🔧 실제 MCP 도구 호출 테스트')
     
     config_manager = create_config_manager()
-    client = create_enhanced_client()
+    client = create_client()
     
     try:
         from mcp_host.config.env_config import get_settings

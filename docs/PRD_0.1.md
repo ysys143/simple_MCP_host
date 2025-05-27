@@ -9,7 +9,7 @@ MCP Python SDK와 LangGraph를 사용하여 몇 시간 안에 구현 가능한 *
 - **포함사항**: 
   - LLM 기반 자연어 이해 (OpenAI ChatGPT)
   - 키워드 기반 폴백 시스템
-  - Enhanced MCP 클라이언트 (langchain-mcp-adapters)
+  - MCP 클라이언트 (langchain-mcp-adapters)
   - LangGraph 하이브리드 워크플로우
   - 웹 채팅 UI, FastAPI 백엔드
 - **외부 의존성**: 별도 레포지토리의 날씨 MCP 서버, OpenAI API
@@ -25,7 +25,7 @@ MCP Python SDK와 LangGraph를 사용하여 몇 시간 안에 구현 가능한 *
 - **FR-003**: 의도 분류 (날씨, 파일 작업, 서버 상태, 도움말, 일반 대화)
 - **FR-004**: LLM 실패 시 키워드 기반 폴백 시스템
 
-#### 2.1.2 Enhanced MCP 호스트 클라이언트
+#### 2.1.2 MCP 호스트 클라이언트
 - **FR-005**: langchain-mcp-adapters 기반 MCP 클라이언트 구현
 - **FR-006**: 외부 MCP 서버 연결 관리 (stdio 프로토콜)
 - **FR-007**: MCP 도구 발견 및 자동 변환 (load_mcp_tools)
@@ -46,7 +46,7 @@ MCP Python SDK와 LangGraph를 사용하여 몇 시간 안에 구현 가능한 *
 #### 2.1.5 FastAPI 백엔드
 - **FR-017**: WebSocket 엔드포인트 (/ws)
 - **FR-018**: LangGraph 하이브리드 워크플로우 실행
-- **FR-019**: Enhanced MCP Client와 LLM 워크플로우 연결
+- **FR-019**: MCP Client와 LLM 워크플로우 연결
 
 #### 2.1.6 외부 MCP 서버 연동
 - **FR-020**: 설정 파일 기반 MCP 서버 목록 관리
@@ -69,7 +69,7 @@ FastAPI 서버 (MCP 호스트)
           ├─ parse_message
           ├─ call_mcp_tool
           └─ generate_response
-       ↕ Enhanced MCP Client (langchain-mcp-adapters)
+       ↕ MCP Client (langchain-mcp-adapters)
 외부 MCP 서버들 (별도 레포)
 ├── weather-mcp-server
 ├── file-mcp-server  
@@ -83,7 +83,7 @@ MCP_test/
 ├── mcp_host/
 │   ├── __main__.py          # CLI 엔트리포인트
 │   ├── adapters/
-│   │   └── enhanced_client.py # Enhanced MCP Client
+│   │   └── client.py # MCP Client
 │   ├── config.py            # MCP 서버 설정
 │   ├── models.py            # 데이터 모델 (Pydantic)
 │   ├── workflows/
@@ -97,7 +97,7 @@ MCP_test/
 │   │   └── run_tests.py     # 테스트 실행기
 │   └── tests/
 │       ├── test_config.py
-│       ├── test_enhanced_client.py  
+│       ├── test_client.py  
 │       ├── test_workflow.py
 │       └── test_llm_workflow.py     # LLM 테스트
 ├── static/
@@ -191,12 +191,12 @@ REASONING: [분류 근거]"""),
     return state
 ```
 
-### 4.2 Enhanced MCP Client (enhanced_client.py)
+### 4.2 MCP Client (client.py)
 ```python
 from langchain_mcp_adapters import MultiServerMCPClient
 from mcp_host.config import create_config_manager
 
-class EnhancedMCPClient:
+class MCPClient:
     """langchain-mcp-adapters 기반 향상된 MCP 클라이언트"""
     
     def __init__(self, config_manager):
@@ -294,7 +294,7 @@ def create_workflow_executor() -> MCPWorkflowExecutor:
 ```python
 from fastapi import FastAPI, WebSocket
 from mcp_host.workflows import create_workflow_executor
-from mcp_host.adapters.enhanced_client import EnhancedMCPClient
+from mcp_host.adapters.client import MCPClient
 
 class MCPHostApp:
     """MCP 호스트 FastAPI 애플리케이션"""
@@ -306,9 +306,9 @@ class MCPHostApp:
         
     async def startup(self):
         """애플리케이션 시작 시 초기화"""
-        # Enhanced MCP Client 초기화
+        # MCP Client 초기화
         config_manager = create_config_manager()
-        self.mcp_client = EnhancedMCPClient(config_manager)
+        self.mcp_client = MCPClient(config_manager)
         await self.mcp_client.connect()
         
         # LLM 하이브리드 워크플로우 실행기 생성
@@ -467,7 +467,7 @@ class MCPHostApp:
 - config.py 및 mcp_servers.json 구현
 - 외부 MCP 서버 연결 로직
 
-### 5.2 1시간: Enhanced MCP 클라이언트 ✅ 완료  
+### 5.2 1시간: MCP 클라이언트 ✅ 완료  
 - langchain-mcp-adapters 통합
 - 다중 서버 연결 관리
 - 자동 도구 로드 및 변환
@@ -491,7 +491,7 @@ class MCPHostApp:
 - **Python 3.11+**
 - **OpenAI API**: ChatGPT LLM 통합 (gpt-4o-mini)
 - **langchain-openai**: LLM 인터페이스
-- **langchain-mcp-adapters**: Enhanced MCP 클라이언트  
+- **langchain-mcp-adapters**: MCP 클라이언트  
 - **LangGraph**: 하이브리드 워크플로우 관리
 - **FastAPI**: WebSocket 지원
 - **uvicorn**: ASGI 서버
@@ -509,7 +509,7 @@ mcp>=1.9.1
 langchain>=0.3.25
 langchain-core>=0.3.61
 langchain-openai>=0.3.18      # LLM 통합
-langchain-mcp-adapters>=0.1.1  # Enhanced MCP Client
+langchain-mcp-adapters>=0.1.1  # MCP Client
 langgraph>=0.4.7
 fastapi>=0.115.12
 uvicorn>=0.34.2
@@ -578,4 +578,4 @@ python mcp_host/tests/test_llm_workflow.py
 
 ## 10. 결론
 
-이 MVP는 **OpenAI ChatGPT를 활용한 자연어 이해**와 **langchain-mcp-adapters 기반 Enhanced MCP Client**를 통해 사용자가 자연어로 외부 MCP 서버들과 상호작용할 수 있는 지능형 호스트 시스템입니다. LLM 기반과 키워드 기반의 하이브리드 아키텍처로 안정성과 확장성을 모두 확보했습니다.
+이 MVP는 **OpenAI ChatGPT를 활용한 자연어 이해**와 **langchain-mcp-adapters 기반 MCP Client**를 통해 사용자가 자연어로 외부 MCP 서버들과 상호작용할 수 있는 지능형 호스트 시스템입니다. LLM 기반과 키워드 기반의 하이브리드 아키텍처로 안정성과 확장성을 모두 확보했습니다.

@@ -1,0 +1,35 @@
+# Query: enhanced
+
+20개 결과 - 6 파일
+
+docs/PRD_0.1.md:
+   12:   - MCP 클라이언트 (langchain-mcp-adapters)
+   28: #### 2.1.2 MCP 호스트 클라이언트
+   49: - **FR-019**: MCP Client와 LLM 워크플로우 연결
+   72:        ↕ MCP Client (langchain-mcp-adapters)
+   86: │   │   └── client.py # MCP Client
+  194: ### 4.2 MCP Client (client.py)
+  470: ### 5.2 1시간: MCP 클라이언트 ✅ 완료  
+  494: - **langchain-mcp-adapters**: MCP 클라이언트  
+  512: langchain-mcp-adapters>=0.1.1  # MCP Client
+  581: 이 MVP는 **OpenAI ChatGPT를 활용한 자연어 이해**와 **langchain-mcp-adapters 기반 MCP Client**를 통해 사용자가 자연어로 외부 MCP 서버들과 상호작용할 수 있는 지능형 호스트 시스템입니다. LLM 기반과 키워드 기반의 하이브리드 아키텍처로 안정성과 확장성을 모두 확보했습니다.
+
+mcp_host/models.py:
+  105:     # MCP Client
+
+mcp_host/adapters/client.py:
+   55:             self._logger.info(f"MCP Client 초기화 완료: {len(self._tools)}개 도구 로드됨")
+  197:                 self._logger.info("MCP Client 연결 해제 완료")
+
+mcp_host/tests/test_direct_tool_call.py:
+  4: 워크플로우를 거치지 않고 Enhanced Client로 직접 도구 호출 결과를 확인합니다.
+
+mcp_host/tests/test_enhanced_client.py:
+  82:     """Enhanced Client의 장점 설명"""
+  83:     print("\n=== Enhanced Client 특징 ===")
+  88:         print("Enhanced Client (langchain-mcp-adapters 기반):")
+
+mcp_host/tests/test_mcp_connection.py:
+   17:     """Enhanced Client의 실제 MCP 서버 연결 테스트"""
+   18:     print("=== MCP Client 실제 연결 테스트 ===")
+  101:         # Enhanced Client 테스트

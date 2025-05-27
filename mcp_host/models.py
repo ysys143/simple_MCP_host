@@ -102,7 +102,7 @@ class ChatState(TypedDict, total=False):
     session_id: Optional[str]
     context: Dict[str, Any]
     
-    # Enhanced MCP Client
+    # MCP Client
     mcp_client: Optional[Any]
     
     # 메시지 히스토리

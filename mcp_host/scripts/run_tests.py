@@ -29,7 +29,7 @@ def main():
     # 개별 테스트 파일들
     test_files = [
         "test_config.py",
-        "test_enhanced_client.py",
+        "test_client.py",
         "test_workflow.py"
     ]
     

@@ -33,9 +33,13 @@
     </nav>
     <div class="container">
         <div class="status-bar">
-            <div id="connectionStatus" class="status disconnected">
-                <div class="status-dot"></div>
-                <span>연결 대기중...</span>
+            <div class="status-item">
+                <span class="status-label">연결 상태:</span>
+                <span id="connectionStatus" class="status-value">연결 중...</span>
+                <div class="connection-controls">
+                    <button id="manualConnectBtn" onclick="manualConnect()" class="control-btn" style="display: none;">연결</button>
+                    <button id="manualDisconnectBtn" onclick="disconnect()" class="control-btn" style="display: none;">해제</button>
+                </div>
             </div>
             <div id="serverInfo">
                 <span id="serverCount">서버: 0개</span> | 

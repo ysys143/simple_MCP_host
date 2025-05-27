@@ -48,7 +48,7 @@ def sample_context():
 
 
 @pytest.fixture
-def mock_enhanced_client():
+def mock_client():
     """향상된 MCP 클라이언트 모킹 픽스처"""
     mock_client = AsyncMock()
     mock_client.get_tools.return_value = [

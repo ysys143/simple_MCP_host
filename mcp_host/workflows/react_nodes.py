@@ -174,68 +174,65 @@ async def react_act_node(state: ChatState) -> ChatState:
     
     session_id = state.get("session_id")
     action = state.get("react_action", "") # 예: "get_forecast: 서울, 3"
+    iteration = state.get("react_iteration", 0)
+    
+    # 연속 실패 카운터 확인
+    consecutive_failures = state.get("react_consecutive_failures", 0)
+    max_consecutive_failures = 3  # 연속 3회 실패 시 종료
     
     # tool_call_result를 먼저 실행하고 결과를 얻습니다.
     tool_call_result: Optional[MCPToolCall] = None
     try:
         tool_call_result = await _execute_action(state, action)
         logger.info(f"[react_act_node] _execute_action 결과: tool_call_result = {tool_call_result!r}") # 로깅 수정: 상세 내용을 위해 !r 사용
+        
+        # 도구 호출이 성공한 경우 실패 카운터 리셋
+        if tool_call_result and tool_call_result.is_successful():
+            state["react_consecutive_failures"] = 0
+        elif tool_call_result is None:
+            # 도구 호출 패턴을 찾지 못한 경우
+            consecutive_failures += 1
+            state["react_consecutive_failures"] = consecutive_failures
+            logger.warning(f"도구 호출 패턴을 찾지 못함. 연속 실패 횟수: {consecutive_failures}")
+            
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(f"연속 {max_consecutive_failures}회 도구 호출 실패로 ReAct 종료")
+                state["react_observation"] = f"연속 {max_consecutive_failures}회 도구 호출에 실패하여 작업을 중단합니다."
+                state["react_should_continue"] = False
+                state["next_step"] = "react_finalize"
+                return state
+        else:
+            # 도구 호출은 했지만 실패한 경우
+            consecutive_failures += 1
+            state["react_consecutive_failures"] = consecutive_failures
+            logger.warning(f"도구 호출 실패. 연속 실패 횟수: {consecutive_failures}")
+            
     except Exception as e:
-        logger.error(f"Act 단계에서 _execute_action 중 오류: {e}")
+        consecutive_failures += 1
+        state["react_consecutive_failures"] = consecutive_failures
+        logger.error(f"Act 단계에서 _execute_action 중 오류: {e}. 연속 실패 횟수: {consecutive_failures}")
+        
+        if consecutive_failures >= max_consecutive_failures:
+            logger.error(f"연속 {max_consecutive_failures}회 오류로 ReAct 종료")
+            state["error"] = f"연속 {max_consecutive_failures}회 오류로 작업을 중단합니다: {str(e)}"
+            state["react_observation"] = f"연속 오류로 인해 작업을 중단합니다: {str(e)}"
+            state["react_should_continue"] = False
+            state["next_step"] = "react_finalize"
+            return state
+        
         state["error"] = f"행동 실행 중 오류: {str(e)}"
         state["react_observation"] = f"행동 실행 실패: {str(e)}"
         state["next_step"] = "react_observe"  # 실패해도 관찰 단계로 진행
-        # SSE로 오류에 대한 acting 메시지 전송도 고려할 수 있으나, 현재는 observation에서 처리
         return state
 
     # SSE 메시지 전송
     if session_id:
         sse_manager = get_sse_manager()
-        
-        # action_details 구성
-        sse_action_details = {
-            "raw_action_string": action, # LLM이 생성한 원본 액션 문자열
-            "tool_name": None, 
-            "parsed_arguments": None
-        }
-
-        if tool_call_result and tool_call_result.tool_name:
-            sse_action_details["tool_name"] = tool_call_result.tool_name
-            sse_action_details["parsed_arguments"] = tool_call_result.arguments
-            # server_name도 필요한 경우 추가 가능: tool_call_result.server_name
-        else:
-            # tool_call_result가 없거나 tool_name이 없는 경우 (예: _execute_action에서 None 반환)
-            # raw_action_string에서 간단히 파싱 시도 (UI 표시용)
-            logger.info(f"[react_act_node] tool_call_result 없거나 tool_name 없음. raw_action='{action}'으로 fallback 파싱 시도.")
-            match = re.search(r"^\s*([\w_-]+)\s*[:\\(]?\s*(.*)\\)?\s*$", action)
-            if match:
-                logger.info(f"[react_act_node] fallback 파싱 성공: group(1)='{match.group(1)}', group(2)='{match.group(2)}'")
-                sse_action_details["tool_name"] = match.group(1)
-                # 매우 기본적인 파싱, UI에서 복잡한 input 대신 보여줄 수 있음
-                # _parse_arguments_with_schema의 결과를 가져올 수 없으므로 제한적
-                raw_args_str = match.group(2)
-                if raw_args_str and raw_args_str.strip(): # raw_args_str가 None이 아니고, strip했을 때 비어있지 않으면
-                    sse_action_details["parsed_arguments"] = {"input": raw_args_str.strip()}
-                else:
-                    sse_action_details["parsed_arguments"] = {} # 인수가 비어있으면 빈 객체
-            else:
-                logger.warning(f"[react_act_node] fallback 파싱 실패. action='{action}'을 unknown_tool_from_raw_action으로 처리.")
-                sse_action_details["tool_name"] = "unknown_tool_from_raw_action"
-                sse_action_details["parsed_arguments"] = {"input": action} # 최후의 수단
-
-        logger.info(f"[react_act_node] sse_manager.send_to_session 호출 직전, sse_action_details: {sse_action_details!r}") # 로깅 추가: 상세 내용을 위해 !r 사용
         acting_msg = create_acting_message(
-            content=f"행동 실행 중: {action}", # UI 상단에 표시될 일반 텍스트
-            session_id=session_id,
-            action_details=sse_action_details # 풍부한 정보를 담은 상세 내용
+            f"행동 실행 중: {action}",
+            session_id,
+            action_details={"iteration": iteration}
         )
-        # <<< 추가된 로깅 시작 >>>
-        logger.info(f"[react_act_node] 생성된 acting_msg 전체: {acting_msg!r}")
-        if hasattr(acting_msg, 'payload') and isinstance(acting_msg.payload, dict):
-            logger.info(f"[react_act_node] acting_msg.payload['action_details']: {acting_msg.payload.get('action_details')!r}")
-        else:
-            logger.warning(f"[react_act_node] acting_msg.payload가 없거나 dict 타입이 아님: {acting_msg.payload if hasattr(acting_msg, 'payload') else 'payload 속성 없음'!r}")
-        # <<< 추가된 로깅 끝 >>>
         await sse_manager.send_to_session(session_id, acting_msg)
     
     try:
@@ -254,10 +251,20 @@ async def react_act_node(state: ChatState) -> ChatState:
         logger.info("Act 단계 완료")
         
     except Exception as e:
-        logger.error(f"Act 단계 후 처리 오류: {e}") # _execute_action 이후의 로직에서 발생한 오류
-        state["error"] = f"행동 결과 처리 중 오류: {str(e)}"
-        state["react_observation"] = f"행동 결과 처리 실패: {str(e)}"
-        state["next_step"] = "react_observe"  # 실패해도 관찰 단계로 진행
+        consecutive_failures += 1
+        state["react_consecutive_failures"] = consecutive_failures
+        logger.error(f"Act 단계 후 처리 오류: {e}. 연속 실패 횟수: {consecutive_failures}") # _execute_action 이후의 로직에서 발생한 오류
+        
+        if consecutive_failures >= max_consecutive_failures:
+            logger.error(f"연속 {max_consecutive_failures}회 후처리 오류로 ReAct 종료")
+            state["error"] = f"연속 {max_consecutive_failures}회 후처리 오류로 작업을 중단합니다: {str(e)}"
+            state["react_observation"] = f"후처리 오류로 인해 작업을 중단합니다: {str(e)}"
+            state["react_should_continue"] = False
+            state["next_step"] = "react_finalize"
+        else:
+            state["error"] = f"행동 결과 처리 중 오류: {str(e)}"
+            state["react_observation"] = f"행동 결과 처리 실패: {str(e)}"
+            state["next_step"] = "react_observe"  # 실패해도 관찰 단계로 진행
     
     return state
 
@@ -538,14 +545,18 @@ async def _build_think_prompt(state: ChatState) -> str:
 
 생각: [현재 상황을 분석하고 다음에 무엇을 해야 할지 생각해보세요. 위에 나열된 필요한 작업들 중 아직 완료되지 않은 것이 있는지 확인하세요.]
 
-행동: [구체적인 행동을 명시하세요. 도구를 사용할 때는 정확히 "도구명: 인수" 형식으로 작성하세요.]
+행동: [구체적인 행동을 자연스럽게 설명하세요. 도구를 사용해야 한다면 어떤 도구로 무엇을 할지 명확히 기술하세요.]
 
 또는
 
 최종 답변: [모든 필요한 정보를 수집했다면 최종 답변을 제공하세요]
 
+행동 작성 가이드:
+- 자연스러운 문장으로 작성하세요 (예: "서울의 날씨 정보를 수집합니다", "get_weather 도구로 부산 날씨 조회")
+- 어떤 도구를 사용할지와 필요한 정보를 명확히 포함하세요
+- 형식에 얽매이지 말고 의도를 명확하게 전달하세요
+
 중요: 
-- 행동은 반드시 "도구명: 인수" 형식으로 작성하세요 (번호나 기호 없이)
 - 위에 나열된 모든 작업을 완료해야 합니다. 하나라도 빠뜨리지 마세요.
 - 한 번에 하나의 작업만 수행하세요."""
     else:
@@ -563,20 +574,26 @@ async def _build_think_prompt(state: ChatState) -> str:
         prompt = f"""이전 관찰 결과: {recent_observation}
 {collected_info}
 
+{available_tools_info}
+
 {required_tasks}
 
 위 결과를 바탕으로 다음 단계를 결정해주세요:
 
 생각: [현재까지의 진행 상황을 분석하고 다음에 무엇을 해야 할지 생각해보세요. 위에 나열된 필요한 작업들 중 아직 완료되지 않은 것이 있는지 반드시 확인하세요.]
 
-행동: [추가로 필요한 행동이 있다면 정확히 "도구명: 인수" 형식으로 명시하세요.]
+행동: [추가로 필요한 행동이 있다면 자연스럽게 설명하세요. 어떤 도구로 무엇을 할지 명확히 기술하세요.]
 
 또는
 
 최종 답변: [모든 필요한 정보를 수집했다면 종합적인 최종 답변을 제공하세요]
 
+행동 작성 가이드:
+- 자연스러운 문장으로 작성하세요 (예: "청주의 날씨 예보를 확인합니다", "get_forecast로 청주 3일 예보 조회")
+- 어떤 도구를 사용할지와 필요한 정보를 명확히 포함하세요
+- 형식에 얽매이지 말고 의도를 명확하게 전달하세요
+
 중요: 
-- 행동은 반드시 "도구명: 인수" 형식으로 작성하세요 (번호나 기호 없이)
 - 위에 나열된 모든 작업이 완료되었는지 반드시 확인하세요. 하나라도 빠뜨리면 안 됩니다.
 - 아직 완료되지 않은 작업이 있다면 계속 진행하세요."""
     
@@ -709,36 +726,112 @@ def _parse_thought_response(response: str) -> Dict[str, str]:
 
 
 async def _execute_action(state: ChatState, action: str) -> Optional[MCPToolCall]:
-    """행동을 실행합니다"""
-    logger.info(f"행동 실행 시도: '{action}'")
+    """LLM을 사용하여 행동을 분석하고 실행합니다"""
+    logger.info(f"LLM 기반 행동 실행 시도: '{action}'")
     
-    # 도구 호출 패턴 매칭 (다양한 형식 지원, 하이픈 포함 도구명 지원 강화)
-    tool_patterns = [
-        r"([\w-]+)\s*:\s*(.+)",           # "도구명: 인수" 형식 (하이픈 허용)
-        r"([\w-]+)\((.+)\)",              # "도구명(인수)" 형식 (하이픈 허용)
-        r"\d+\.\s*([\w-]+)\s*:\s*(.+)",   # "1. 도구명: 인수" 형식 (하이픈 허용)
-        r"-\s*([\w-]+)\s*:\s*(.+)",       # "- 도구명: 인수" 형식 (하이픈 허용)
-        r"use\s+([\w-]+)\s+(?:with|for)\s+(.+)",  # "use 도구명 with 인수" 형식 (하이픈 허용)
-        r"call\s+([\w-]+)\s+(?:with|for)\s+(.+)", # "call 도구명 with 인수" 형식 (하이픈 허용)
-        r"([\w-]+)\s+(.+)",               # "도구명 인수" 형식 (하이픈 허용, 가장 관대한 패턴)
-    ]
+    # MCP 클라이언트에서 사용 가능한 도구 목록 가져오기
+    available_tools = []
+    mcp_client = state.get("mcp_client")
+    if mcp_client:
+        try:
+            tools = mcp_client.get_tools()
+            for tool in tools:
+                tool_name = getattr(tool, 'name', '')
+                tool_desc = getattr(tool, 'description', '')
+                available_tools.append(f"- {tool_name}: {tool_desc}")
+            logger.info(f"사용 가능한 도구 목록: {[getattr(tool, 'name', '') for tool in tools]}")
+        except Exception as e:
+            logger.warning(f"도구 목록 수집 실패: {e}")
     
-    for i, pattern in enumerate(tool_patterns):
-        match = re.search(pattern, action.strip(), re.IGNORECASE)
-        if match:
-            tool_name = match.group(1)
-            arguments_str = match.group(2)
-            
-            logger.info(f"패턴 {i+1} 매칭 성공: 도구='{tool_name}', 인수='{arguments_str}'")
-            
-            # 도구 호출 실행
-            return await _call_mcp_tool(state, tool_name, arguments_str)
+    if not available_tools:
+        logger.warning("사용 가능한 도구가 없습니다")
+        return None
     
-    # 패턴 매칭 실패 시 로그 출력
-    logger.warning(f"도구 호출 패턴을 찾을 수 없습니다: '{action}'")
-    
-    # 도구 호출이 아닌 경우 None 반환
-    return None
+    # LLM을 사용한 행동 분석 프롬프트
+    analysis_prompt = f"""다음 행동 설명을 분석하여 실행할 도구와 인수를 추출해주세요.
+
+행동 설명: "{action}"
+
+사용 가능한 도구들:
+{chr(10).join(available_tools)}
+
+지침:
+1. 행동 설명에서 실행하려는 도구를 식별하세요
+2. 도구명은 위의 사용 가능한 도구 목록에서만 선택하세요
+3. 필요한 인수들을 추출하세요
+4. 도구 호출이 아닌 일반적인 설명이라면 "NO_TOOL"로 응답하세요
+
+응답 형식 (JSON):
+{{
+    "tool_name": "도구명 또는 NO_TOOL",
+    "arguments": "인수 문자열",
+    "reasoning": "선택 이유"
+}}
+
+예시:
+- "get_weather: 서울" → {{"tool_name": "get_weather", "arguments": "서울", "reasoning": "서울의 날씨 정보 조회"}}
+- "서울의 날씨 정보 수집" → {{"tool_name": "get_weather", "arguments": "서울", "reasoning": "서울의 날씨 정보가 필요함"}}
+- "분석 결과 정리" → {{"tool_name": "NO_TOOL", "arguments": "", "reasoning": "도구 호출이 아닌 일반 작업"}}
+
+응답:"""
+
+    try:
+        llm = get_llm()
+        
+        # LLM 호출
+        from langchain_core.messages import SystemMessage
+        response = await llm.ainvoke([SystemMessage(content=analysis_prompt)])
+        
+        # JSON 응답 파싱
+        response_text = response.content.strip()
+        logger.info(f"LLM 행동 분석 응답: {response_text}")
+        
+        # JSON 추출 (```json 블록이 있을 수 있음)
+        import json
+        import re
+        
+        # JSON 블록 추출
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # JSON 블록이 없으면 전체에서 JSON 찾기
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                logger.warning(f"LLM 응답에서 JSON을 찾을 수 없음: {response_text}")
+                return None
+        
+        try:
+            parsed_response = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON 파싱 실패: {e}, 원본: {json_str}")
+            return None
+        
+        tool_name = parsed_response.get("tool_name", "").strip()
+        arguments_str = parsed_response.get("arguments", "").strip()
+        reasoning = parsed_response.get("reasoning", "")
+        
+        logger.info(f"LLM 분석 결과 - 도구: '{tool_name}', 인수: '{arguments_str}', 이유: '{reasoning}'")
+        
+        # NO_TOOL인 경우 None 반환
+        if tool_name == "NO_TOOL" or not tool_name:
+            logger.info("도구 호출이 아닌 일반 작업으로 판단됨")
+            return None
+        
+        # 도구명 검증: 실제 존재하는 도구인지 확인
+        available_tool_names = {getattr(tool, 'name', '') for tool in mcp_client.get_tools()}
+        if tool_name not in available_tool_names:
+            logger.warning(f"존재하지 않는 도구: '{tool_name}'. 사용 가능한 도구: {available_tool_names}")
+            return None
+        
+        # 도구 호출 실행
+        return await _call_mcp_tool(state, tool_name, arguments_str)
+        
+    except Exception as e:
+        logger.error(f"LLM 기반 행동 분석 중 오류: {e}")
+        return None
 
 
 async def _call_mcp_tool(state: ChatState, tool_name: str, arguments_str: str) -> MCPToolCall:
@@ -860,7 +953,7 @@ async def _call_mcp_tool(state: ChatState, tool_name: str, arguments_str: str) -
         
         logger.info(f"동적 MCP 도구 호출: {server_name}.{tool_name}")
         
-        # Enhanced MCP Client의 call_tool 메서드 사용
+        # MCP Client의 call_tool 메서드 사용
         result = await mcp_client.call_tool(server_name, tool_name, arguments, session_id=session_id)
         
         tool_call.result = result
@@ -1235,7 +1328,7 @@ def _build_final_answer_prompt(state: ChatState) -> str:
 
 답변 작성 지침:
 1. 수집된 모든 정보를 활용하여 포괄적인 답변을 제공하세요
-2. 비교가 요청된 경우, 각 항목을 비교 분석하세요
+2. 비교가 요청되었다면, 각 항목을 비교 분석하세요
 3. 마크다운 형식을 사용하여 읽기 쉽게 구성하세요
 4. 구체적이고 실용적인 정보를 포함하세요
 5. 사용자가 요청한 모든 항목을 다루었는지 확인하세요

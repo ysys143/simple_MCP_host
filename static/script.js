@@ -23,140 +23,81 @@ let currentReActStepsContainer = null; // ReAct 단계 컨테이너 추적
 let currentStepIndex = 1; // 현재 단계 인덱스
 let isRespondingToUser = false; // 사용자 응답 상태 추적
 
-// 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    // 요소 참조 저장
-    connectionStatus = document.getElementById('connectionStatus');
-    serverCount = document.getElementById('serverCount');
-    toolCount = document.getElementById('toolCount');
-    chatContainer = document.getElementById('chatContainer');
-    messageInput = document.getElementById('messageInput');
-    sendButton = document.getElementById('sendButton');
+// 재연결 관리 변수들 추가
+let reconnectAttempts = 0;
+let maxReconnectAttempts = 10;
+let baseReconnectDelay = 3000; // 3초
+let maxReconnectDelay = 60000; // 60초
+let reconnectTimeoutId = null;
+let isManualDisconnect = false;
+let isPageVisible = true;
+
+// 페이지 가시성 API 설정
+document.addEventListener('visibilitychange', function() {
+    isPageVisible = !document.hidden;
     
-    // Phoenix UI 링크 설정
-    const phoenixUILink = document.getElementById('phoenixUILink');
-    if (phoenixUILink) {
-        fetch('/api/config')
-            .then(response => response.json())
-            .then(config => {
-                if (config.is_phoenix_enabled && config.phoenix_base_url) {
-                    phoenixUILink.href = config.phoenix_base_url;
-                    // phoenixUILink.style.display = 'flex'; // CSS에서 .nav-links가 이미 display:flex를 가짐
-                    // HTML에 phoenix-link-inactive 클래스가 이미 적용되어 있으므로, 여기서는 특별히 추가/제거할 필요 없음
-                    // 만약 HTML에 없다면 여기서 classList.add('phoenix-link-inactive')를 할 수 있음
-
-                    // (선택 사항) 프로젝트 이름 표시
-                    const projectInfo = document.createElement('span');
-                    projectInfo.textContent = `(Project: ${config.project_name || 'default'})`;
-                    projectInfo.style.fontSize = '0.7rem'; // 로고/메뉴보다 작게
-                    projectInfo.style.marginLeft = '8px'; // 링크 텍스트와 간격
-                    projectInfo.style.color = '#bbb'; // 약간 흐리게
-                    // projectInfo.style.alignSelf = 'center'; // 부모가 flex container가 아니므로 불필요, a 태그의 align-items가 처리
-                    
-                    phoenixUILink.appendChild(projectInfo); // a 태그의 자식으로 추가
-
-                } else {
-                    phoenixUILink.style.display = 'none'; 
-                }
-            })
-            .catch(error => {
-                console.error('Phoenix 설정을 가져오는 중 오류 발생:', error);
-                phoenixUILink.style.display = 'none';
-            });
+    if (document.hidden) {
+        console.log('페이지가 비활성화됨 - SSE 연결 일시 중단');
+        // 페이지가 숨겨지면 재연결 시도 중단
+        if (reconnectTimeoutId) {
+            clearTimeout(reconnectTimeoutId);
+            reconnectTimeoutId = null;
+        }
     } else {
-        console.warn("Phoenix UI 링크 요소를 찾을 수 없습니다. (ID: phoenixUILink)");
+        console.log('페이지가 활성화됨 - SSE 연결 재시도');
+        // 페이지가 다시 보이면 연결되지 않은 경우 재연결 시도
+        if (!isConnected && !isManualDisconnect) {
+            scheduleReconnect();
+        }
     }
-    
-    // 키보드 이벤트 리스너 등록
-    setupEventListeners();
-    
-    // 초기 연결
-    connect();
 });
 
-// 이벤트 리스너 설정
-function setupEventListeners() {
-    console.log('이벤트 리스너 설정 시작');
-    console.log('messageInput 요소:', messageInput);
-    console.log('sendButton 요소:', sendButton);
-    
-    if (!messageInput) {
-        console.error('messageInput 요소를 찾을 수 없습니다!');
+// 지수 백오프를 적용한 재연결 스케줄링
+function scheduleReconnect() {
+    // 페이지가 비활성화되어 있거나 수동 연결 해제 상태면 재연결하지 않음
+    if (!isPageVisible || isManualDisconnect) {
+        console.log('재연결 조건 불충족 - 페이지 비활성화 또는 수동 해제');
         return;
     }
     
-    if (!sendButton) {
-        console.error('sendButton 요소를 찾을 수 없습니다!');
+    // 최대 재연결 시도 횟수 초과 확인
+    if (reconnectAttempts >= maxReconnectAttempts) {
+        console.log(`최대 재연결 시도 횟수 초과 (${maxReconnectAttempts}회)`);
+        updateConnectionStatus('failed', '🔴 연결 실패 (재시도 한계 초과)');
         return;
     }
     
-    // Enter 키 처리
-    messageInput.addEventListener('keydown', function(e) {
-        console.log('키 이벤트 감지:', e.key, 'shiftKey:', e.shiftKey);
-        
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            
-            console.log('Enter 키 감지, isSending:', isSending, 'isComposing:', isComposing);
-            
-            // 전송 중이거나 IME 조합 중이면 무시
-            if (isSending || isComposing) {
-                console.log('전송 중이거나 IME 조합 중이므로 Enter 무시');
-                return;
-            }
-            
-            console.log('Enter 키로 sendMessage 호출');
-            sendMessage();
-        }
-    });
-
-    // 키보드 이벤트 추가 디버깅
-    messageInput.addEventListener('keypress', function(e) {
-        console.log('keypress 이벤트:', e.key, e.code);
-    });
-
-    messageInput.addEventListener('keyup', function(e) {
-        console.log('keyup 이벤트:', e.key, e.code);
-    });
-
-    // IME 조합 이벤트
-    messageInput.addEventListener('compositionstart', function(e) {
-        isComposing = true;
-        console.log('IME 조합 시작');
-    });
-
-    messageInput.addEventListener('compositionend', function(e) {
-        isComposing = false;
-        console.log('IME 조합 종료, 입력값:', e.target.value);
-    });
-
-    // 입력창 자동 크기 조절
-    messageInput.addEventListener('input', autoResize);
-
-    // 전송 버튼 클릭 이벤트
-    sendButton.addEventListener('click', function(e) {
-        e.preventDefault();
-        console.log('전송 버튼 클릭');
-        sendMessage();
-    });
-
-    // 명령어 예제 클릭 이벤트
-    const commandExamples = document.querySelectorAll('.command-example');
-    console.log('명령어 예제 개수:', commandExamples.length);
-    commandExamples.forEach(example => {
-        example.addEventListener('click', function() {
-            const command = this.textContent.trim().substring(2); // 이모지 제거
-            console.log('명령어 예제 클릭:', command);
-            insertCommand(command);
-        });
-    });
+    // 지수 백오프 계산
+    const delay = Math.min(baseReconnectDelay * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+    reconnectAttempts++;
     
-    console.log('이벤트 리스너 설정 완료');
+    console.log(`재연결 시도 ${reconnectAttempts}/${maxReconnectAttempts} - ${delay}ms 후 재시도`);
+    updateConnectionStatus('reconnecting', `🟡 재연결 중... (${reconnectAttempts}/${maxReconnectAttempts})`);
+    
+    // 기존 타이머 정리
+    if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId);
+    }
+    
+    reconnectTimeoutId = setTimeout(() => {
+        reconnectTimeoutId = null;
+        connect();
+    }, delay);
 }
 
-// 세션 ID 생성
+// 재연결 상태 초기화
+function resetReconnectState() {
+    reconnectAttempts = 0;
+    if (reconnectTimeoutId) {
+        clearTimeout(reconnectTimeoutId);
+        reconnectTimeoutId = null;
+    }
+}
+
 function generateSessionId() {
-    return 'web_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    // 탭별 고유 식별자 추가
+    const tabId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    return `web_${tabId}_${Date.now()}`;
 }
 
 function connect() {
@@ -186,6 +127,10 @@ function connect() {
             console.log('SSE 연결 열림');
             updateConnectionStatus('connected', '🟢 연결됨');
             loadSystemInfo();
+            
+            // 연결 성공 시 재연결 상태 초기화
+            resetReconnectState();
+            isManualDisconnect = false;
         };
 
         eventSource.onmessage = function(event) {
@@ -233,12 +178,21 @@ function connect() {
         eventSource.onerror = function(event) {
             console.error('SSE 오류:', event);
             updateConnectionStatus('disconnected', '🔴 연결 끊김');
-            setTimeout(connect, 3000); // 재연결 시도
+            
+            // 수동 연결 해제가 아닌 경우에만 재연결 시도
+            if (!isManualDisconnect) {
+                scheduleReconnect();
+            }
         };
         
     } catch (error) {
         console.error('연결 시도 중 오류:', error);
         updateConnectionStatus('disconnected', '🔴 연결 오류');
+        
+        // 연결 시도 중 오류 발생 시에도 재연결 시도
+        if (!isManualDisconnect) {
+            scheduleReconnect();
+        }
     }
 }
 
@@ -603,13 +557,30 @@ function handleToolResult(data) {
 }
 
 function updateConnectionStatus(status, text) {
-    connectionStatus.className = `status ${status}`;
-    const statusText = connectionStatus.querySelector('span');
-    if (statusText) {
-        statusText.textContent = text;
-    } else {
-        // span이 없으면 직접 텍스트 설정
-        connectionStatus.innerHTML = `<span class="status-dot"></span><span>${text}</span>`;
+    if (connectionStatus) {
+        connectionStatus.textContent = text;
+        connectionStatus.className = `status ${status}`;
+        isConnected = (status === 'connected');
+        
+        // 수동 연결/해제 버튼 표시 제어
+        const manualConnectBtn = document.getElementById('manualConnectBtn');
+        const manualDisconnectBtn = document.getElementById('manualDisconnectBtn');
+        
+        if (manualConnectBtn && manualDisconnectBtn) {
+            if (status === 'connected') {
+                manualConnectBtn.style.display = 'none';
+                manualDisconnectBtn.style.display = 'inline-block';
+            } else if (status === 'failed' || status === 'disconnected') {
+                manualConnectBtn.style.display = 'inline-block';
+                manualDisconnectBtn.style.display = 'none';
+            } else {
+                // 연결 중이거나 재연결 중일 때는 둘 다 숨김
+                manualConnectBtn.style.display = 'none';
+                manualDisconnectBtn.style.display = 'none';
+            }
+        }
+        
+        console.log('연결 상태 업데이트:', status, text);
     }
 }
 
@@ -1071,4 +1042,152 @@ function activatePhoenixUILinkAfterChat() {
     } else {
         console.error('[activatePhoenixUILinkAfterChat] Phoenix UI link element NOT found!');
     }
+}
+
+// 수동 연결 해제 함수 추가
+function disconnect() {
+    console.log('수동 SSE 연결 해제');
+    isManualDisconnect = true;
+    resetReconnectState();
+    
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+    
+    updateConnectionStatus('disconnected', '🔴 연결 해제됨');
+}
+
+// 수동 연결 함수 추가
+function manualConnect() {
+    console.log('수동 SSE 연결 시도');
+    isManualDisconnect = false;
+    resetReconnectState();
+    connect();
+}
+
+// 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    // 요소 참조 저장
+    connectionStatus = document.getElementById('connectionStatus');
+    serverCount = document.getElementById('serverCount');
+    toolCount = document.getElementById('toolCount');
+    chatContainer = document.getElementById('chatContainer');
+    messageInput = document.getElementById('messageInput');
+    sendButton = document.getElementById('sendButton');
+    
+    // Phoenix UI 링크 설정
+    const phoenixUILink = document.getElementById('phoenixUILink');
+    if (phoenixUILink) {
+        fetch('/api/config')
+            .then(response => response.json())
+            .then(config => {
+                if (config.is_phoenix_enabled && config.phoenix_base_url) {
+                    phoenixUILink.href = config.phoenix_base_url;
+                    
+                    // (선택 사항) 프로젝트 이름 표시
+                    const projectInfo = document.createElement('span');
+                    projectInfo.textContent = `(Project: ${config.project_name || 'default'})`;
+                    projectInfo.style.fontSize = '0.7rem';
+                    projectInfo.style.marginLeft = '8px';
+                    projectInfo.style.color = '#bbb';
+                    
+                    phoenixUILink.appendChild(projectInfo);
+                } else {
+                    phoenixUILink.style.display = 'none'; 
+                }
+            })
+            .catch(error => {
+                console.error('Phoenix 설정을 가져오는 중 오류 발생:', error);
+                phoenixUILink.style.display = 'none';
+            });
+    } else {
+        console.warn("Phoenix UI 링크 요소를 찾을 수 없습니다. (ID: phoenixUILink)");
+    }
+    
+    // 키보드 이벤트 리스너 등록
+    setupEventListeners();
+    
+    // 초기 연결
+    connect();
+});
+
+// 이벤트 리스너 설정
+function setupEventListeners() {
+    console.log('이벤트 리스너 설정 시작');
+    console.log('messageInput 요소:', messageInput);
+    console.log('sendButton 요소:', sendButton);
+    
+    if (!messageInput) {
+        console.error('messageInput 요소를 찾을 수 없습니다!');
+        return;
+    }
+    
+    if (!sendButton) {
+        console.error('sendButton 요소를 찾을 수 없습니다!');
+        return;
+    }
+    
+    // Enter 키 처리
+    messageInput.addEventListener('keydown', function(e) {
+        console.log('키 이벤트 감지:', e.key, 'shiftKey:', e.shiftKey);
+        
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            
+            console.log('Enter 키 감지, isSending:', isSending, 'isComposing:', isComposing);
+            
+            // 전송 중이거나 IME 조합 중이면 무시
+            if (isSending || isComposing) {
+                console.log('전송 중이거나 IME 조합 중이므로 Enter 무시');
+                return;
+            }
+            
+            console.log('Enter 키로 sendMessage 호출');
+            sendMessage();
+        }
+    });
+
+    // 키보드 이벤트 추가 디버깅
+    messageInput.addEventListener('keypress', function(e) {
+        console.log('keypress 이벤트:', e.key, e.code);
+    });
+
+    messageInput.addEventListener('keyup', function(e) {
+        console.log('keyup 이벤트:', e.key, e.code);
+    });
+
+    // IME 조합 이벤트
+    messageInput.addEventListener('compositionstart', function(e) {
+        isComposing = true;
+        console.log('IME 조합 시작');
+    });
+
+    messageInput.addEventListener('compositionend', function(e) {
+        isComposing = false;
+        console.log('IME 조합 종료, 입력값:', e.target.value);
+    });
+
+    // 입력창 자동 크기 조절
+    messageInput.addEventListener('input', autoResize);
+
+    // 전송 버튼 클릭 이벤트
+    sendButton.addEventListener('click', function(e) {
+        e.preventDefault();
+        console.log('전송 버튼 클릭');
+        sendMessage();
+    });
+
+    // 명령어 예제 클릭 이벤트
+    const commandExamples = document.querySelectorAll('.command-example');
+    console.log('명령어 예제 개수:', commandExamples.length);
+    commandExamples.forEach(example => {
+        example.addEventListener('click', function() {
+            const command = this.textContent.trim().substring(2); // 이모지 제거
+            console.log('명령어 예제 클릭:', command);
+            insertCommand(command);
+        });
+    });
+    
+    console.log('이벤트 리스너 설정 완료');
 } 

@@ -774,4 +774,46 @@ body {
     overflow-x: auto;
     border: none;
     border-radius: 0;
+}
+
+/* 연결 제어 버튼 스타일 */
+.connection-controls {
+    display: inline-flex;
+    gap: 8px;
+    margin-left: 10px;
+}
+
+.control-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #f8f9fa;
+    color: #333;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.control-btn:active {
+    background: #dee2e6;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-label {
+    font-weight: 500;
+    color: #666;
+}
+
+.status-value {
+    font-weight: 600;
 } 

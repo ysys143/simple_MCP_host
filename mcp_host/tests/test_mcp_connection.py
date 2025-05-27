@@ -7,17 +7,17 @@ MultiServerMCPClient를 사용한 실제 MCP 서버 연결을 테스트합니다
 import asyncio
 import json
 import logging
-from mcp_host.adapters.enhanced_client import EnhancedMCPClient
+from mcp_host.adapters.client import MCPClient
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 
 
-async def test_enhanced_client_connection():
-    """Enhanced Client의 실제 MCP 서버 연결 테스트"""
-    print("=== Enhanced MCP Client 실제 연결 테스트 ===")
+async def test_client_connection():
+    """Client의 실제 MCP 서버 연결 테스트"""
+    print("=== MCP Client 실제 연결 테스트 ===")
     
-    client = EnhancedMCPClient()
+    client = MCPClient()
     
     try:
         # JSON 설정 로드 및 초기화
@@ -98,8 +98,8 @@ async def main():
     json_ok = await test_json_config_loading()
     
     if json_ok:
-        # Enhanced Client 테스트
-        client_ok = await test_enhanced_client_connection()
+        # Client 테스트
+        client_ok = await test_client_connection()
         
         if client_ok:
             print("\n모든 테스트 통과! 실제 MCP 연결이 성공적으로 작동합니다.")

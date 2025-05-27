@@ -15,9 +15,9 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from mcp_host.config import create_config_manager
-from mcp_host.adapters import EnhancedMCPClient
-from mcp_host.adapters.enhanced_client import create_enhanced_client
-
+from mcp_host.adapters import MCPClient
+from mcp_host.adapters.client import create_client
+from mcp_host.tests import test_client_connection
 
 # 로깅 설정
 logging.basicConfig(
@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 
 
-async def test_enhanced_client():
+async def test_client():
     """향상된 클라이언트 테스트"""
     print("=== langchain-mcp-adapters 기반 클라이언트 테스트 ===")
     
@@ -36,7 +36,7 @@ async def test_enhanced_client():
         print("1. 설정 관리자 생성 완료")
         
         # 2. 향상된 클라이언트 생성
-        client = create_enhanced_client()
+        client = create_client()
         print("2. 향상된 MCP 클라이언트 생성 완료")
         
         # 3. 비동기 컨텍스트 매니저로 클라이언트 사용
@@ -79,13 +79,13 @@ async def test_enhanced_client():
 
 
 async def compare_approaches():
-    """Enhanced Client의 장점 설명"""
-    print("\n=== Enhanced Client 특징 ===")
+    """Client의 장점 설명"""
+    print("\n=== Client 특징 ===")
     
     try:
         config_manager = create_config_manager()
         
-        print("Enhanced Client (langchain-mcp-adapters 기반):")
+        print("Client (langchain-mcp-adapters 기반):")
         print("  - 표준화된 MultiServerMCPClient 사용")
         print("  - 자동 도구 변환 (load_mcp_tools)")
         print("  - LangGraph와 직접 통합 가능")
@@ -103,10 +103,10 @@ async def compare_approaches():
 
 async def main():
     """메인 테스트 함수"""
-    print("Enhanced MCP Client 테스트 시작\n")
+    print("MCP Client 테스트 시작\n")
     
     # 새로운 클라이언트 테스트
-    client_test = await test_enhanced_client()
+    client_test = await test_client()
     
     # 방식 비교
     comparison_test = await compare_approaches()

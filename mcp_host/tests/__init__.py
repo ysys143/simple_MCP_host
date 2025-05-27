@@ -7,6 +7,5 @@ __version__ = "1.0.0"
 __all__ = [
     "test_config",
     "test_client", 
-    "test_enhanced_client",
     "test_workflow"
 ] 
