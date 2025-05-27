@@ -40,6 +40,10 @@ def get_forecast(location: str, days: int = 3) -> str:
     Returns:
         일기예보 문자열
     """
+    # <<< 추가된 로깅 시작 >>>
+    import sys
+    print(f"[dummy_weather_server.get_forecast ENTRY] Received location: '{location}' (type: {type(location)}), days: {days} (type: {type(days)})", file=sys.stderr)
+    # <<< 추가된 로깅 끝 >>>
     forecasts = []
     for day in range(1, days + 1):
         forecasts.append(f"Day {day}: 맑음, 22도")

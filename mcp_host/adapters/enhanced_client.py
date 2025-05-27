@@ -100,6 +100,10 @@ class EnhancedMCPClient:
             ValueError: 도구를 찾을 수 없는 경우
             Exception: 도구 실행 실패
         """
+        # <<< 추가된 로깅 시작 >>>
+        self._logger.info(f"[EnhancedMCPClient.call_tool ENTRY] server_name: {server_name}, tool_name: {tool_name}, received arguments: {arguments}, type: {type(arguments)}")
+        # <<< 추가된 로깅 끝 >>>
+
         # JSON-RPC 요청 객체 생성 (로깅용)
         request_payload = {
             "jsonrpc": "2.0",
@@ -107,7 +111,7 @@ class EnhancedMCPClient:
             "params": {
                 "server": server_name,
                 "name": tool_name,
-                "arguments": arguments
+                "arguments": arguments # 여기서 arguments가 어떻게 사용되는지 중요
             },
             "id": f"mcp-host-{Path(session_id).name}-{int(asyncio.get_event_loop().time() * 1000)}"
         }
@@ -126,7 +130,9 @@ class EnhancedMCPClient:
             # 도구 실행
             self._logger.info(f"실제 MCP 도구 호출: {server_name}.{tool_name}") # 기존 내부 로깅
             
-            # LangChain 도구 호출 - session_id를 여기서 전달하지 않습니다.
+            # <<< 추가된 로깅 시작 >>>
+            self._logger.info(f"[EnhancedMCPClient.call_tool PRE-INVOKE] Calling tool.ainvoke with arguments: {arguments}, type: {type(arguments)}")
+            # <<< 추가된 로깅 끝 >>>
             result = await tool.ainvoke(arguments) 
             
             self._logger.info(f"MCP 도구 호출 성공: {tool_name}") # 기존 내부 로깅

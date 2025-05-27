@@ -904,14 +904,14 @@ function sendMessage() {
         resetSendingState();
     });
     
-    // 타임아웃 안전장치 (20초로 단축)
+    // 타임아웃 안전장치 (120초)
     timeoutId = setTimeout(() => {
         if (isSending) {
             console.log('타임아웃으로 전송 상태 재설정');
             resetSendingState();
             addAssistantMessage({ response: '응답 시간이 초과되었습니다. 다시 시도해 주세요.' });
         }
-    }, 20000);
+    }, 120000);
 }
 
 function autoResize() {
@@ -929,12 +929,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ReAct 단계별 메시지 처리
 function handleReActStep(data) {
-    console.log('ReAct 단계 처리:', data.type, data.content);
+    console.log('ReAct 단계 처리:', data.type, data.content, data.action_details, data.observation_data);
     
-    // ReAct 컨테이너가 없으면 새로 생성
     if (!currentReActContainer) {
-        hideTypingIndicator(); // 타이핑 인디케이터 숨기기
-        
+        hideTypingIndicator();
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message assistant react-container';
         messageDiv.innerHTML = `
@@ -944,169 +942,103 @@ function handleReActStep(data) {
                     <span class="react-title">🧠 ReAct 사고 과정</span>
                     <span class="react-time">${new Date().toLocaleTimeString()}</span>
                 </div>
-                <div class="react-steps"></div>
+                <div class="react-steps-container"></div>
             </div>
         `;
-        
         chatContainer.appendChild(messageDiv);
-        currentReActContainer = messageDiv.querySelector('.react-steps');
-        scrollToBottom();
-    }
-    
-    let stepIcon = '';
-    let stepClass = '';
-    let stepTitle = '';
-    
-    switch (data.type) {
-        case 'thinking':
-            stepIcon = '🤔';
-            stepClass = 'react-thinking';
-            stepTitle = '사고';
-            break;
-        case 'acting':
-            stepIcon = '⚡';
-            stepClass = 'react-acting';
-            stepTitle = '행동';
-            break;
-        case 'observing':
-            stepIcon = '👁️';
-            stepClass = 'react-observing';
-            stepTitle = '관찰';
-            break;
-    }
-    
-    const iteration = data.metadata?.iteration || '';
-    const iterationText = iteration ? ` ${iteration}` : '';
-    
-    // 단계 요소 생성
-    const stepDiv = document.createElement('div');
-    stepDiv.className = `react-step-item ${stepClass}`;
-    
-    let stepContent = '';
-    
-    // acting 단계에서 도구 호출 정보를 JSON-RPC 형태로 표시
-    if (data.type === 'acting' && data.content) {
-        const toolMatch = data.content.match(/행동 실행 중:\s*(.+)/);
-        if (toolMatch) {
-            const actionText = toolMatch[1];
-            const toolPattern = /(\w+):\s*(.+)/;
-            const toolMatchResult = actionText.match(toolPattern);
-            
-            if (toolMatchResult) {
-                const toolName = toolMatchResult[1];
-                const toolArgsText = toolMatchResult[2];
-                
-                // 도구 인수를 파싱하여 JSON 객체로 변환 시도
-                let toolArgs = {};
-                try {
-                    // 간단한 파싱 (예: location="서울" 형태)
-                    const argMatches = toolArgsText.match(/(\w+)="([^"]+)"/g);
-                    if (argMatches) {
-                        argMatches.forEach(match => {
-                            const [, key, value] = match.match(/(\w+)="([^"]+)"/);
-                            toolArgs[key] = value;
-                        });
-                    } else {
-                        // 파싱 실패시 원본 텍스트 사용
-                        toolArgs = { "input": toolArgsText };
-                    }
-                } catch (e) {
-                    toolArgs = { "input": toolArgsText };
-                }
-                
-                // JSON-RPC 요청 형태로 구성
-                const jsonRpcRequest = {
-                    "jsonrpc": "2.0",
-                    "id": Date.now(),
-                    "method": "tools/call",
-                    "params": {
-                        "name": toolName,
-                        "arguments": toolArgs
-                    }
-                };
-                
-                const formattedRequest = JSON.stringify(jsonRpcRequest, null, 2);
-                
-                stepContent = `
-                    <div style="margin-top: 8px;">
-                        <div style="font-weight: bold; margin-bottom: 4px;">🔧 MCP 도구 호출 요청</div>
-                        ${createCollapsibleJson(formattedRequest, 'JSON-RPC 요청')}
-                    </div>
-                `;
-            } else {
-                stepContent = escapeHtml(data.content);
-            }
-        } else {
-            stepContent = escapeHtml(data.content);
+        currentReActContainer = messageDiv;
+        currentReActStepsContainer = messageDiv.querySelector('.react-steps-container');
+        currentStepIndex = 1;
+        if (isRespondingToUser) {
+            isRespondingToUser = false;
         }
     }
-    // observing 단계에서 도구 결과를 JSON-RPC 형태로 표시
-    else if (data.type === 'observing' && data.content) {
-        const successMatch = data.content.match(/도구 '(\w+)' 실행 성공:\s*(.+)/);
-        const failMatch = data.content.match(/도구 '(\w+)' 실행 실패:\s*(.+)/);
+
+    const timestamp = new Date().toLocaleTimeString(); // 이 변수는 이제 UI 표시에는 직접 사용되지 않음
+
+    if (data.type === 'thinking') {
+        const stepDiv = document.createElement('div');
+        stepDiv.className = `react-step react-thinking react-step-${currentStepIndex}`;
+        stepDiv.innerHTML = `
+            <div class="react-step-header">
+                <span class="react-step-icon">🤔</span>
+                <span class="react-step-title">생각하는 중...</span>
+            </div>
+            <div class="react-step-content"><p>${escapeHtml(data.content)}</p></div>
+        `;
+        currentReActStepsContainer.appendChild(stepDiv);
+        currentStepIndex++;
+    } else if (data.type === 'acting') {
+        const stepDiv = document.createElement('div');
+        stepDiv.className = `react-step react-acting react-step-${currentStepIndex}`;
         
-        if (successMatch || failMatch) {
-            const isSuccess = !!successMatch;
-            const toolName = isSuccess ? successMatch[1] : failMatch[1];
-            const resultText = isSuccess ? successMatch[2] : failMatch[2];
-            
-            // JSON-RPC 응답 형태로 구성
-            const jsonRpcResponse = {
-                "jsonrpc": "2.0",
-                "id": Date.now(),
-            };
-            
-            if (isSuccess) {
-                jsonRpcResponse.result = {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": resultText
-                        }
-                    ]
-                };
-            } else {
-                jsonRpcResponse.error = {
-                    "code": -1,
-                    "message": "Tool execution failed",
-                    "data": resultText
-                };
-            }
-            
-            const formattedResponse = JSON.stringify(jsonRpcResponse, null, 2);
-            
-            stepContent = `
-                <div style="margin-top: 8px;">
-                    <div style="font-weight: bold; margin-bottom: 4px;">📤 MCP 도구 호출 응답 (도구: ${toolName})</div>
-                    ${createCollapsibleJson(formattedResponse, 'JSON-RPC 응답')}
-                </div>
-            `;
-        } else {
-            stepContent = escapeHtml(data.content);
+        const actionDetails = data.metadata && data.metadata.action_details ? data.metadata.action_details : undefined;
+        
+        let toolNameForDisplay = "알 수 없는 도구";
+        let argumentsForDisplay = {};
+
+        if (actionDetails && typeof actionDetails === 'object') {
+            if (actionDetails.tool_name) toolNameForDisplay = actionDetails.tool_name;
+            if (actionDetails.parsed_arguments) argumentsForDisplay = actionDetails.parsed_arguments;
         }
-    }
-    // thinking 단계는 간략하게 표시
-    else if (data.type === 'thinking' && data.content.includes('사고:')) {
-        const thoughtMatch = data.content.match(/사고:\s*(.+)/);
-        if (thoughtMatch) {
-            const thoughtText = thoughtMatch[1];
-            stepContent = escapeHtml(thoughtText.substring(0, 100) + (thoughtText.length > 100 ? '...' : ''));
-        } else {
-            stepContent = escapeHtml(data.content);
+
+        const jsonRpcRequest = {
+            jsonrpc: "2.0",
+            id: `react-act-${Date.now()}`,
+            method: "tools/call",
+            params: { name: toolNameForDisplay, arguments: argumentsForDisplay }
+        };
+
+        let actingContentHtml = `
+            <div class="react-step-header">
+                <span class="react-step-icon">🚀</span>
+                <span class="react-step-title">행동 실행 중: ${escapeHtml(data.content)}</span>
+            </div>
+            <div class="react-step-content">
+        `;
+
+        // // DEBUG: Display raw actionDetails directly in the UI
+        // const debugPreText = 'DEBUG data.action_details: ' + JSON.stringify(actionDetails, null, 2);
+        // actingContentHtml += `<pre style="white-space: pre-wrap; word-break: break-all; background-color: #f0f0f0; padding: 8px; border: 1px solid #ccc; margin-top: 5px; margin-bottom: 5px;">${escapeHtml(debugPreText)}</pre>`;
+        
+        // MCP 도구 호출 요청 JSON 표시 부분 (주석 해제)
+        actingContentHtml += `
+                <h3 style="font-size: 0.9em; margin-top: 10px; margin-bottom: 5px;">MCP 도구 호출 요청</h3>
+                ${createCollapsibleJson(JSON.stringify(jsonRpcRequest, null, 2), `MCP 도구 호출 요청 (${toolNameForDisplay})`, true)}
+            </div>
+        `;
+        stepDiv.innerHTML = actingContentHtml;
+        currentReActStepsContainer.appendChild(stepDiv);
+        currentStepIndex++;
+    } else if (data.type === 'observing') {
+        const stepDiv = document.createElement('div');
+        stepDiv.className = `react-step react-observing react-step-${currentStepIndex}`;
+
+        const actualRequestJson = data.observation_data?.actual_mcp_request_json;
+        const actualResponseJson = data.observation_data?.actual_mcp_response_json;
+        const toolNameFromObservation = actualRequestJson ? JSON.parse(actualRequestJson).params.name : "알 수 없는 도구";
+
+        let observationDisplay = `<div class="react-observation-text">${renderMarkdown(data.content)}</div>`;
+        if (actualRequestJson) {
+            observationDisplay += createCollapsibleJson(actualRequestJson, `실제 MCP 요청 (${toolNameFromObservation})`, true);
         }
+        if (actualResponseJson) {
+            observationDisplay += createCollapsibleJson(actualResponseJson, `실제 MCP 응답 (${toolNameFromObservation})`, true);
+        }
+
+        stepDiv.innerHTML = `
+            <div class="react-step-header">
+                <span class="react-step-icon">👀</span>
+                <span class="react-step-title">관찰</span>
+            </div>
+            <div class="react-step-content">
+                ${observationDisplay}
+            </div>
+        `;
+        currentReActStepsContainer.appendChild(stepDiv);
+        currentStepIndex++;
     }
-    // 기타 단계는 그대로 표시
-    else {
-        stepContent = escapeHtml(data.content);
-    }
-    
-    stepDiv.innerHTML = `
-        <span class="step-icon">${stepIcon}</span>
-        <span class="step-title">${stepTitle}:</span>
-        <div class="step-content">${stepContent}</div>
-    `;
-    
-    currentReActContainer.appendChild(stepDiv);
+
     scrollToBottom();
 }
 
@@ -1114,15 +1046,15 @@ function handleReActStep(data) {
 function activatePhoenixUILinkAfterChat() {
     console.log('[activatePhoenixUILinkAfterChat] Function called.');
     if (isPhoenixLinkActivatedByChat) {
-        console.log('[activatePhoenixUILinkAfterChat] Link already activated by chat. Skipping.');
+        // console.log('[activatePhoenixUILinkAfterChat] Link already activated by chat. Skipping.'); // 너무 빈번한 로그라 주석 처리
         return; // 이미 활성화되었으면 중복 실행 방지
     }
 
     const phoenixUILink = document.getElementById('phoenixUILink');
     if (phoenixUILink) {
-        console.log('[activatePhoenixUILinkAfterChat] Phoenix UI link element found.');
-        console.log('[activatePhoenixUILinkAfterChat] Current display style:', phoenixUILink.style.display);
-        console.log('[activatePhoenixUILinkAfterChat] Current classList before change:', phoenixUILink.classList.toString());
+        // console.log('[activatePhoenixUILinkAfterChat] Phoenix UI link element found.'); // 너무 빈번한 로그라 주석 처리
+        // console.log('[activatePhoenixUILinkAfterChat] Current display style:', phoenixUILink.style.display); // 너무 빈번한 로그라 주석 처리
+        // console.log('[activatePhoenixUILinkAfterChat] Current classList before change:', phoenixUILink.classList.toString()); // 너무 빈번한 로그라 주석 처리
 
         // 서버 설정에 의해 Phoenix UI가 활성화된 경우에만 채팅 기반 활성화 로직 적용
         // (기존 /api/config fetch 로직은 그대로 유지되며, 그 결과에 따라 기본 display 상태가 결정됨)
@@ -1131,10 +1063,10 @@ function activatePhoenixUILinkAfterChat() {
             phoenixUILink.classList.remove('phoenix-link-inactive');
             isPhoenixLinkActivatedByChat = true;
             console.log('[activatePhoenixUILinkAfterChat] "phoenix-link-inactive" class removed.');
-            console.log('[activatePhoenixUILinkAfterChat] isPhoenixLinkActivatedByChat set to true.');
-            console.log('[activatePhoenixUILinkAfterChat] Current classList after change:', phoenixUILink.classList.toString());
+            // console.log('[activatePhoenixUILinkAfterChat] isPhoenixLinkActivatedByChat set to true.'); // 너무 빈번한 로그라 주석 처리
+            // console.log('[activatePhoenixUILinkAfterChat] Current classList after change:', phoenixUILink.classList.toString()); // 너무 빈번한 로그라 주석 처리
         } else {
-            console.log('[activatePhoenixUILinkAfterChat] Link is hidden (display: none), not activating.');
+            // console.log('[activatePhoenixUILinkAfterChat] Link is hidden (display: none), not activating.'); // 너무 빈번한 로그라 주석 처리
         }
     } else {
         console.error('[activatePhoenixUILinkAfterChat] Phoenix UI link element NOT found!');

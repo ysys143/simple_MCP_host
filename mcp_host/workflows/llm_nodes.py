@@ -59,11 +59,11 @@ def get_llm() -> ChatOpenAI:
     return _llm_instance
 
 
-def llm_parse_intent(state: ChatState) -> ChatState:
-    """LLM을 사용하여 사용자 의도를 분석합니다
+async def llm_parse_intent(state: ChatState) -> ChatState:
+    """LLM을 사용하여 사용자 의도를 분석하고 적절한 도구를 선택합니다
     
-    기존의 키워드 매칭 대신 ChatGPT가 자연어로 사용자 의도를 이해합니다.
-    더 정확하고 유연한 의도 분석이 가능합니다.
+    사용 가능한 모든 MCP 도구의 설명을 LLM에게 제공하여
+    사용자 요청에 가장 적합한 도구를 동적으로 선택합니다.
     
     Args:
         state: 현재 워크플로우 상태
@@ -73,54 +73,116 @@ def llm_parse_intent(state: ChatState) -> ChatState:
     """
     try:
         current_message = state.get("current_message")
+        mcp_client = state.get("mcp_client")
+        
         if not current_message:
             raise ValueError("현재 메시지가 없습니다")
         
-        # 사용자 입력에서 이모지 제거 (UTF-8 인코딩 에러 방지)
+        # 사용자 입력 정리
         user_input = current_message.content
-        # 이모지 제거 정규식
         user_input_clean = re.sub(r'[\U00010000-\U0010ffff]|[\u2600-\u27BF]|[\uD800-\uDBFF][\uDC00-\uDFFF]', '', user_input)
         user_input_clean = user_input_clean.strip()
         
-        logger.info(f"LLM 의도 분석 시작: {user_input_clean}")
+        logger.info(f"동적 LLM 의도 분석 시작: {user_input_clean}")
         
-        # LLM을 사용한 의도 분석
+        # 사용 가능한 도구 목록 수집
+        available_tools_info = ""
+        if mcp_client:
+            try:
+                tools = mcp_client.get_tools()
+                server_names = mcp_client.get_server_names()
+                
+                tool_descriptions = []
+                for tool in tools:
+                    tool_name = getattr(tool, 'name', '이름없음')
+                    tool_desc = getattr(tool, 'description', '설명없음')
+                    
+                    # 도구명만 사용 (서버명 제외)
+                    tool_descriptions.append(f"- {tool_name}: {tool_desc}")
+                
+                if tool_descriptions:
+                    available_tools_info = "사용 가능한 도구들:\n" + "\n".join(tool_descriptions)
+                else:
+                    available_tools_info = "현재 사용 가능한 도구가 없습니다."
+                    
+            except Exception as e:
+                logger.warning(f"도구 정보 수집 실패: {e}")
+                available_tools_info = "도구 정보를 가져올 수 없습니다."
+        else:
+            available_tools_info = "MCP 클라이언트가 초기화되지 않았습니다."
+        
+        # LLM을 사용한 동적 의도 분석
         llm = get_llm()
         
-        # 의도 분석 프롬프트
-        intent_prompt = ChatPromptTemplate.from_messages([
-            ("system", """당신은 사용자의 요청을 분석하여 의도를 파악하는 AI입니다.
-다음 중 하나의 의도로 분류해주세요:
+        # 동적 의도 분석 프롬프트 (안전한 방식으로 구성)
+        system_prompt = f"""당신은 사용자의 요청을 분석하여 적절한 도구를 선택하는 AI입니다.
 
-1. WEATHER_QUERY: 날씨 관련 질문 (현재 날씨, 예보 등)
-2. FILE_OPERATION: 파일/디렉토리 작업 (목록 보기, 파일 읽기 등)  
-3. SERVER_STATUS: MCP 서버 상태 확인
-4. TOOL_LIST: 사용 가능한 도구 목록 요청
-5. HELP: 도움말이나 사용법 문의
-6. GENERAL_CHAT: 일반적인 대화
+{available_tools_info}
+
+사용자 요청을 분석하여 다음 중 하나로 분류해주세요:
+
+1. TOOL_CALL: 위의 도구 중 하나를 사용해야 하는 경우
+   - 도구 이름과 필요한 매개변수를 정확히 식별해주세요
+   - 여러 도구가 필요한 경우 가장 적합한 하나를 선택해주세요
+
+2. GENERAL_CHAT: 일반적인 대화나 정보 제공 요청
+   - 도구 없이 답변 가능한 경우
+
+3. HELP: 도움말이나 사용법 문의
+4. SERVER_STATUS: MCP 서버 상태 확인  
+5. TOOL_LIST: 사용 가능한 도구 목록 요청
 
 응답 형식:
 INTENT: [의도]
 CONFIDENCE: [0.0-1.0 신뢰도]
+TARGET_TOOL: [정확한 도구명 또는 null]
 PARAMETERS: [추출된 매개변수들, JSON 형식]
-REASONING: [분류 근거]
+REASONING: [선택 근거]
+
+중요: TARGET_TOOL은 위에 나열된 도구명과 정확히 일치해야 합니다.
 
 예시:
-INTENT: WEATHER_QUERY
+INTENT: TOOL_CALL
 CONFIDENCE: 0.95
-PARAMETERS: {{"location": "서울", "forecast": true, "days": 3}}
-REASONING: 사용자가 서울의 3일 예보를 요청했습니다."""),
-            ("human", "{user_input}")
-        ])
+TARGET_TOOL: get_weather
+PARAMETERS: {{"location": "부산"}}
+REASONING: 사용자가 부산의 날씨 정보를 요청했습니다.
+
+중요 지침:
+- 여러 지역이나 항목이 언급된 경우, ReAct 모드를 권장하세요
+- 복잡한 비교나 분석 요청은 ReAct 모드에서 처리하세요
+- 단순한 단일 정보 조회만 이 모드에서 처리하세요"""
+
+        # 안전한 메시지 구성 (ChatPromptTemplate 없이)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_input_clean)
+        ]
         
         # LLM 호출
-        chain = intent_prompt | llm
-        response = chain.invoke({"user_input": user_input_clean})
+        response = await llm.ainvoke(messages)
         response_text = response.content
         
         # 응답 파싱 (원본 user_input 사용)
         parsed_intent = _parse_llm_intent_response(response_text, user_input)
         state["parsed_intent"] = parsed_intent
+        
+        # 복잡한 요청 감지 및 ReAct 모드 전환
+        user_input_lower = user_input_clean.lower()
+        is_complex_request = (
+            len(re.findall(r'[,，]', user_input_clean)) >= 2 or  # 쉼표가 2개 이상
+            any(keyword in user_input_lower for keyword in ['비교', '분석', '리포트', '여러', '모든', '각각']) or
+            len(re.findall(r'[가-힣]{2,}(?:\s*,\s*[가-힣]{2,}){2,}', user_input_clean)) > 0  # 3개 이상의 한국어 단어가 쉼표로 구분
+        )
+        
+        if is_complex_request and not state.get("react_mode"):
+            logger.info(f"복잡한 요청 감지 - ReAct 모드로 전환: {user_input_clean}")
+            # ReAct 모드로 전환
+            state["react_mode"] = True
+            state["should_use_react"] = True
+            update_workflow_step(state, "switch_to_react")
+            return state
         
         # 다음 단계 결정
         if parsed_intent.is_mcp_action():
@@ -128,14 +190,25 @@ REASONING: 사용자가 서울의 3일 예보를 요청했습니다."""),
         else:
             update_workflow_step(state, "llm_generate_response")
         
-        logger.info(f"LLM 의도 분석 완료: {parsed_intent.intent_type.value}")
+        logger.info(f"동적 LLM 의도 분석 완료: {parsed_intent.intent_type.value}")
+        if parsed_intent.target_server and parsed_intent.target_tool:
+            logger.info(f"선택된 도구: {parsed_intent.target_server}.{parsed_intent.target_tool}")
+        
         return state
         
     except Exception as e:
-        logger.error(f"LLM 의도 분석 오류: {e}")
-        # 실패 시 기존 키워드 방식으로 폴백
-        logger.info("키워드 기반 의도 분석으로 폴백")
-        update_workflow_step(state, "parse_message")
+        logger.error(f"동적 LLM 의도 분석 오류: {e}")
+        # 실패 시 일반 대화로 처리
+        from ..models import ParsedIntent, IntentType
+        fallback_intent = ParsedIntent(
+            intent_type=IntentType.GENERAL_CHAT,
+            confidence=0.5,
+            parameters={},
+            target_server=None,
+            target_tool=None
+        )
+        state["parsed_intent"] = fallback_intent
+        update_workflow_step(state, "llm_generate_response")
         return state
 
 
@@ -220,8 +293,8 @@ def llm_generate_response(state: ChatState) -> ChatState:
                     for server_name in server_names:
                         server_tools = tools_info.get(server_name, [])
                         if server_tools:
-                            # 서버별 섹션 추가
-                            server_icon = "🌤️" if server_name == "weather" else "📁" if server_name == "file-manager" else "🔧"
+                            # 서버별 섹션 추가 (동적 아이콘 생성)
+                            server_icon = _get_server_icon(server_name)
                             content_parts.append(f"\n### {server_icon} {server_name} 서버")
                             
                             for tool in server_tools:
@@ -265,7 +338,7 @@ def llm_generate_response(state: ChatState) -> ChatState:
                     content_parts = ["## 🟢 서버 상태\n", "### 연결된 서버"]
                     
                     for server_name in server_names:
-                        server_icon = "🌤️" if server_name == "weather" else "📁" if server_name == "file-manager" else "🔧"
+                        server_icon = _get_server_icon(server_name)
                         content_parts.append(f"- **{server_name}**: {server_icon} 서버 ✅")
                     
                     content_parts.extend([
@@ -378,6 +451,8 @@ def _parse_llm_intent_response(response_text: str, user_input: str) -> ParsedInt
         intent_type_str = "GENERAL_CHAT"
         confidence = 0.5
         parameters = {}
+        target_server = None
+        target_tool = None
         
         for line in lines:
             line = line.strip()
@@ -388,6 +463,9 @@ def _parse_llm_intent_response(response_text: str, user_input: str) -> ParsedInt
                     confidence = float(line.replace("CONFIDENCE:", "").strip())
                 except ValueError:
                     confidence = 0.5
+            elif line.startswith("TARGET_TOOL:"):
+                tool_str = line.replace("TARGET_TOOL:", "").strip()
+                target_tool = tool_str if tool_str.lower() != "null" else None
             elif line.startswith("PARAMETERS:"):
                 param_str = line.replace("PARAMETERS:", "").strip()
                 try:
@@ -402,8 +480,14 @@ def _parse_llm_intent_response(response_text: str, user_input: str) -> ParsedInt
         except ValueError:
             intent_type = IntentType.GENERAL_CHAT
         
-        # 대상 서버와 도구 결정
-        target_server, target_tool = _determine_target_from_intent(intent_type, parameters)
+        # 도구명으로 서버 자동 추론 (동적 방식)
+        if target_tool:
+            target_server = _infer_server_from_tool(target_tool)
+        
+        # TOOL_CALL인데 target_tool이 없으면 폴백
+        if intent_type == IntentType.TOOL_CALL and not target_tool:
+            # 기존 방식으로 폴백
+            target_server, target_tool = _determine_target_from_intent_fallback(parameters, user_input)
         
         return ParsedIntent(
             intent_type=intent_type,
@@ -425,27 +509,59 @@ def _parse_llm_intent_response(response_text: str, user_input: str) -> ParsedInt
         )
 
 
-def _determine_target_from_intent(intent_type: IntentType, parameters: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
-    """의도와 매개변수로부터 대상 서버와 도구를 결정합니다"""
-    if intent_type == IntentType.WEATHER_QUERY:
-        if parameters.get('forecast'):
-            return 'weather', 'get_forecast'
-        else:
-            return 'weather', 'get_weather'
+def _infer_server_from_tool(tool_name: str) -> Optional[str]:
+    """도구명으로부터 서버명을 동적으로 추론합니다 (완전 동적 방식)"""
+    if not tool_name:
+        return None
     
-    elif intent_type == IntentType.FILE_OPERATION:
-        operation = parameters.get('operation', 'list')
-        tool_map = {
-            'list': 'list_files',
-            'read': 'read_file', 
-            'info': 'file_info'
-        }
-        return 'file-manager', tool_map.get(operation, 'list_files')
+    # 도구명에서 서버명 추출 시도
+    tool_lower = tool_name.lower()
     
-    elif intent_type in [IntentType.TOOL_LIST, IntentType.SERVER_STATUS, IntentType.HELP, IntentType.GENERAL_CHAT]:
-        # 이러한 요청들은 MCP 도구 호출이 아닌 시스템 정보 제공
-        return None, None
+    # 하이픈이나 언더스코어로 구분된 경우 첫 번째 부분을 서버로 추정
+    if '-' in tool_name:
+        potential_server = tool_name.split('-')[0]
+        return potential_server
+    elif '_' in tool_name:
+        potential_server = tool_name.split('_')[0]
+        return potential_server
     
+    # 기본값: None (MCP 클라이언트가 자동으로 찾도록)
+    return None
+
+
+def _determine_target_from_intent_fallback(parameters: Dict[str, Any], user_input: str) -> tuple[Optional[str], Optional[str]]:
+    """폴백: 매개변수와 사용자 입력으로부터 대상 서버와 도구를 추정합니다 (완전 동적 방식)"""
+    # 하드코딩된 키워드 매칭 제거
+    # 매개변수나 사용자 입력에서 힌트를 찾되, 특정 도구에 의존하지 않음
+    
+    # 매개변수에서 힌트 찾기
+    if parameters:
+        # 첫 번째 매개변수 키를 기반으로 추론
+        first_key = list(parameters.keys())[0] if parameters else None
+        first_value = list(parameters.values())[0] if parameters else None
+        
+        if first_key and first_value:
+            # 매개변수 이름과 값을 기반으로 일반적인 추론
+            return None, None  # 동적 시스템에서는 LLM이 결정하도록 함
+    
+    # 사용자 입력에서 서버나 도구 이름이 명시적으로 언급된 경우만 처리
+    user_lower = user_input.lower()
+    
+    # 명시적인 서버/도구 언급 찾기 (동적)
+    import re
+    
+    # "서버명.도구명" 패턴 찾기
+    server_tool_pattern = r'(\w+)\.(\w+)'
+    matches = re.findall(server_tool_pattern, user_input)
+    if matches:
+        return matches[0][0], matches[0][1]
+    
+    # 특정 서버가 명시적으로 언급된 경우
+    server_mentions = re.findall(r'(\w+)\s*(?:서버|server)', user_lower)
+    if server_mentions:
+        return server_mentions[0], None
+    
+    # 기본적으로는 LLM이 결정하도록 None 반환
     return None, None
 
 
@@ -464,8 +580,11 @@ class StreamingCallbackHandler(BaseCallbackHandler):
             self.current_content += token
             self.token_count += 1
             
-            # 매 3개 토큰마다 전송
-            if self.token_count % 3 == 0:
+            # 동적 배치 크기 계산
+            batch_size = max(2, min(5, 3 + (self.token_count // 20)))  # 2-5 사이에서 적응적 조정
+            
+            # 동적 배치마다 전송
+            if self.token_count % batch_size == 0:
                 self._send_partial_update_sync()
     
     def on_llm_end(self, response, **kwargs) -> None:
@@ -551,7 +670,7 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
 - 마크다운 형식으로 답변을 작성해주세요
 - 적절한 제목(##), 목록(-), 강조(**텍스트**), 코드(`코드`) 등을 사용하세요
 - 답변은 한국어로 친근하고 이해하기 쉽게 작성해주세요
-- 정보가 많을 때는 구조화된 형태로 정리해주세요"""
+- 정보가 많을 때는 구조화된 형태로 정리해주세요."""
 
         messages = [SystemMessage(content=system_message)]
         
@@ -607,13 +726,16 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
                     word_buffer += token
                     token_count += 1
                     
-                    # 단어 단위 버퍼링 전략 (자연스러운 방식)
+                    # 단어 단위 버퍼링 전략 (동적 방식)
+                    max_word_length = 12 + len(token) // 2  # 토큰 길이에 따른 적응적 버퍼
+                    token_batch_size = 15 + (token_count // 10)  # 진행에 따른 배치 크기 증가
+                    
                     should_send = (
                         token in [' ', '\t'] or  # 공백이나 탭 (단어 구분자)
                         token in ['.', '!', '?', ',', ';', ':', '\n'] or  # 구두점이나 줄바꿈
                         token in ['。', '！', '？', '，', '；', '：'] or  # 한국어/중국어 구두점
-                        len(word_buffer) >= 15 or  # 너무 긴 단어 방지 (15글자 제한)
-                        token_count % 20 == 0  # 안전장치: 20토큰마다 강제 전송
+                        len(word_buffer) >= max_word_length or  # 적응적 단어 길이 제한
+                        token_count % token_batch_size == 0  # 적응적 배치 전송
                     )
                     
                     if should_send and word_buffer.strip():  # 공백만 있는 버퍼는 전송하지 않음
@@ -631,15 +753,18 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
                         # 버퍼 초기화
                         word_buffer = ""
                         
-                        # 자연스러운 읽기 지연
+                        # 자연스러운 읽기 지연 (동적 계산)
+                        base_delay = 0.03  # 기본 지연
                         if token in ['.', '!', '?', '。', '！', '？']:
-                            await asyncio.sleep(0.15)  # 문장 끝 지연
+                            delay = base_delay * 5  # 문장 끝
                         elif token in [',', ';', '，', '；']:
-                            await asyncio.sleep(0.08)  # 쉼표 지연
+                            delay = base_delay * 2.5  # 쉼표
                         elif token == '\n':
-                            await asyncio.sleep(0.1)   # 줄바꿈 지연
+                            delay = base_delay * 3  # 줄바꿈
                         else:
-                            await asyncio.sleep(0.05)  # 일반 단어 지연
+                            delay = base_delay  # 일반 단어
+                        
+                        await asyncio.sleep(delay)
             
             # 마지막 남은 단어 전송
             if word_buffer.strip():
@@ -685,3 +810,33 @@ async def llm_generate_response_with_streaming(state: ChatState, sse_manager, se
         logger.error(f"스택 트레이스: {traceback.format_exc()}")
         # 오류 시 기존 방식으로 폴백
         return llm_generate_response(state) 
+
+
+def _get_server_icon(server_name: str) -> str:
+    """서버 이름을 기반으로 동적으로 아이콘을 생성합니다"""
+    server_lower = server_name.lower()
+    
+    # 서버 이름의 특성을 기반으로 아이콘 선택
+    if any(keyword in server_lower for keyword in ['weather', 'clima', 'forecast']):
+        return "🌤️"
+    elif any(keyword in server_lower for keyword in ['file', 'files', 'manager', 'storage']):
+        return "📁"
+    elif any(keyword in server_lower for keyword in ['context', 'search', 'library', 'docs']):
+        return "📚"
+    elif any(keyword in server_lower for keyword in ['web', 'http', 'api']):
+        return "🌐"
+    elif any(keyword in server_lower for keyword in ['database', 'db', 'sql']):
+        return "🗄️"
+    elif any(keyword in server_lower for keyword in ['chat', 'message', 'communication']):
+        return "💬"
+    elif any(keyword in server_lower for keyword in ['time', 'clock', 'schedule']):
+        return "⏰"
+    elif any(keyword in server_lower for keyword in ['security', 'auth', 'login']):
+        return "🔐"
+    elif any(keyword in server_lower for keyword in ['image', 'photo', 'picture']):
+        return "🖼️"
+    elif any(keyword in server_lower for keyword in ['video', 'media', 'stream']):
+        return "🎥"
+    else:
+        # 기본 도구 아이콘
+        return "🔧" 

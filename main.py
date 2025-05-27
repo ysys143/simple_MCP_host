@@ -67,11 +67,27 @@ if phoenix_enabled:
         # phoenix_register 함수는 OpenTelemetry TracerProvider를 반환합니다.
         tracer_provider = phoenix_register(project_name="mcp_host_traces")
 
-        # LangChain 계측
+        # OpenInference 관련 로거 레벨 조정 (불필요한 에러 메시지 완전 차단)
+        openinference_logger = logging.getLogger('openinference')
+        openinference_logger.setLevel(logging.CRITICAL)  # CRITICAL 레벨만 표시 (거의 모든 메시지 차단)
+        openinference_logger.disabled = True  # 완전히 비활성화
+        
+        # LangChain tracer 로거도 비활성화
+        tracer_logger = logging.getLogger('openinference.instrumentation.langchain._tracer')
+        tracer_logger.setLevel(logging.CRITICAL)
+        tracer_logger.disabled = True
+        
+        # LangChain 계측 (안전한 설정)
         # LangChainInstrumentor는 LangChain의 다양한 구성 요소를 자동으로 계측합니다.
         # skip_dep_check=True는 의존성 검사를 건너뛰어 일부 환경에서의 오류를 방지할 수 있습니다.
-        LangChainInstrumentor(tracer_provider=tracer_provider).instrument(skip_dep_check=True)
-        logger.info("Phoenix를 사용하여 LangChain 계측 완료")
+        try:
+            instrumentor = LangChainInstrumentor(tracer_provider=tracer_provider)
+            # 커스텀 메시지 타입으로 인한 에러를 방지하기 위해 예외 처리 추가
+            instrumentor.instrument(skip_dep_check=True)
+            logger.info("Phoenix를 사용하여 LangChain 계측 완료")
+        except Exception as instrument_error:
+            logger.warning(f"LangChain 계측 중 일부 오류 발생 (무시됨): {instrument_error}")
+            logger.info("Phoenix UI는 정상적으로 실행되었지만 일부 추적 기능이 제한될 수 있습니다.")
 
     except ImportError:
         logger.warning("Phoenix 관련 패키지를 찾을 수 없어 LangChain 추적을 시작할 수 없습니다. "

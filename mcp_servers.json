@@ -12,5 +12,13 @@
       "PYTHONPATH": "/Users/jaesolshin/MCP_test",
       "SAFE_MODE": "true"
     }
+  },
+  "context7": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@upstash/context7-mcp@latest"
+    ],
+    "transport": "stdio"
   }
 } 

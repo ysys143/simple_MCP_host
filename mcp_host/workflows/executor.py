@@ -252,7 +252,16 @@ class MCPWorkflowExecutor:
             await sse_manager.send_to_session(session_id, thinking_msg)
             
             # 의도 분석 단계
-            state = llm_parse_intent(initial_state)
+            state = await llm_parse_intent(initial_state)
+            
+            # ReAct 모드 전환 체크
+            if state.get("should_use_react"):
+                logger.info("복잡한 요청으로 인한 ReAct 모드 전환")
+                
+                # ReAct 모드로 재실행
+                return await self.execute_message_with_streaming(
+                    user_message, session_id, sse_manager, context, mcp_client, react_mode=True
+                )
             
             # 의도 분석 결과 스트리밍
             if state.get("parsed_intent"):

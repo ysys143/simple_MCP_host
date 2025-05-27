@@ -22,14 +22,12 @@ class MessageRole(str, Enum):
 
 class IntentType(str, Enum):
     """사용자 의도 유형을 나타내는 열거형"""
-    WEATHER_QUERY = "WEATHER_QUERY"
-    FILE_OPERATION = "FILE_OPERATION"
-    API_REQUEST = "API_REQUEST"
-    SERVER_STATUS = "SERVER_STATUS"
-    TOOL_LIST = "TOOL_LIST"
-    GENERAL_CHAT = "GENERAL_CHAT"
-    HELP = "HELP"
-    UNKNOWN = "UNKNOWN"
+    TOOL_CALL = "TOOL_CALL"  # 특정 도구 호출이 필요한 경우
+    GENERAL_CHAT = "GENERAL_CHAT"  # 일반 대화
+    HELP = "HELP"  # 도움말 요청
+    SERVER_STATUS = "SERVER_STATUS"  # 서버 상태 확인
+    TOOL_LIST = "TOOL_LIST"  # 도구 목록 요청
+    UNKNOWN = "UNKNOWN"  # 알 수 없는 의도
 
 
 @dataclass
@@ -67,11 +65,7 @@ class ParsedIntent:
     
     def is_mcp_action(self) -> bool:
         """MCP 도구 호출이 필요한 의도인지 확인합니다"""
-        return self.intent_type in [
-            IntentType.WEATHER_QUERY,
-            IntentType.FILE_OPERATION, 
-            IntentType.API_REQUEST
-        ]
+        return self.intent_type == IntentType.TOOL_CALL
 
 
 @dataclass
@@ -86,6 +80,8 @@ class MCPToolCall:
     result: Optional[Any] = None
     error: Optional[str] = None
     execution_time_ms: Optional[int] = None
+    mcp_request_json: Optional[str] = None # 실제 MCP 요청 JSON 문자열
+    mcp_response_json: Optional[str] = None # 실제 MCP 응답 JSON 문자열
     
     def is_successful(self) -> bool:
         """도구 호출이 성공했는지 확인합니다"""
