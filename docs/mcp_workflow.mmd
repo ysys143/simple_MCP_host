@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	parse_message(parse_message)
+	call_mcp_tool(call_mcp_tool)
+	generate_response(generate_response)
+	react_think(react_think)
+	react_act(react_act)
+	react_observe(react_observe)
+	react_finalize(react_finalize)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> parse_message;
+	call_mcp_tool --> generate_response;
+	parse_message -.-> call_mcp_tool;
+	parse_message -.-> generate_response;
+	parse_message -.-> react_think;
+	react_act -.-> __end__;
+	react_act -.-> react_finalize;
+	react_act -.-> react_observe;
+	react_observe -.-> __end__;
+	react_observe -.-> react_finalize;
+	react_observe -.-> react_think;
+	react_think -.-> __end__;
+	react_think -.-> generate_response;
+	react_think -.-> react_act;
+	react_think -.-> react_finalize;
+	generate_response --> __end__;
+	react_finalize --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

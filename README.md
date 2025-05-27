@@ -59,9 +59,60 @@ MCP는 AI 애플리케이션이 다양한 데이터 소스와 도구에 안전�
 
 ## 🔄 워크플로우 아키텍처
 
-![워크플로우 그래프](docs/workflow_graph.png)
+### 📊 실제 워크플로우 구조
+
+[**🔗 인터랙티브 워크플로우 다이어그램 보기**](docs/mcp_workflow.html) 
+
+```mermaid
+graph TD;
+    __start__([시작]):::first
+    parse_message(메시지 파싱)
+    call_mcp_tool(MCP 도구 호출)
+    generate_response(응답 생성)
+    react_think(ReAct: 사고)
+    react_act(ReAct: 행동)
+    react_observe(ReAct: 관찰)
+    react_finalize(ReAct: 최종화)
+    __end__([종료]):::last
+    
+    __start__ --> parse_message
+    
+    %% 조건부 분기
+    parse_message -.-> call_mcp_tool
+    parse_message -.-> generate_response
+    parse_message -.-> react_think
+    
+    %% 일반 워크플로우
+    call_mcp_tool --> generate_response
+    generate_response --> __end__
+    
+    %% ReAct 워크플로우 (순환)
+    react_think -.-> react_act
+    react_think -.-> react_finalize
+    react_think -.-> generate_response
+    
+    react_act -.-> react_observe
+    react_act -.-> react_finalize
+    
+    react_observe -.-> react_think
+    react_observe -.-> react_finalize
+    
+    %% 최종 종료
+    react_finalize --> __end__
+    
+    classDef default fill:#f2f0ff,line-height:1.2
+    classDef first fill:#e1f5fe
+    classDef last fill:#bfb6fc
+```
 
 *LangGraph 기반 워크플로우 구조: 사용자 입력부터 최종 응답까지의 전체 처리 흐름*
+
+#### 🔍 워크플로우 설명
+- **실선 (→)**: 항상 실행되는 연결
+- **점선 (-.->)**: 조건부 분기 (상태에 따라 결정)
+- **ReAct 사이클**: Think → Act → Observe 순환 구조
+- **정상 종료**: `generate_response` 또는 `react_finalize`에서 명시적으로 END로 연결
+- **비정상 종료**: 각 노드에서 `__end__`로 직접 연결되는 경우는 예외 상황이나 오류 발생 시의 안전장치
 
 ### 🤖 두 가지 처리 모드
 
