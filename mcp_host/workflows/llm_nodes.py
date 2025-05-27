@@ -23,40 +23,8 @@ from .state_utils import update_workflow_step, set_error, increment_step_count
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-# LLM 인스턴스 (싱글톤 패턴)
-_llm_instance = None
-
-
-def get_llm() -> ChatOpenAI:
-    """ChatOpenAI LLM 인스턴스를 반환합니다
-    
-    환경변수에서 OpenAI API 키를 읽어와 LLM을 초기화합니다.
-    싱글톤 패턴으로 인스턴스를 재사용합니다.
-    
-    Returns:
-        ChatOpenAI: 설정된 OpenAI 채팅 모델
-        
-    Raises:
-        ValueError: OPENAI_API_KEY 환경변수가 설정되지 않은 경우
-    """
-    global _llm_instance
-    
-    if _llm_instance is None:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "OPENAI_API_KEY 환경변수가 설정되지 않았습니다. "
-                "OpenAI API 키를 설정해주세요."
-            )
-        
-        _llm_instance = ChatOpenAI(
-            model="gpt-4o-mini",  # 빠르고 경제적인 모델
-            temperature=0.1,      # 일관된 응답을 위해 낮은 온도
-            max_tokens=1000,      # 적절한 응답 길이
-        )
-        logger.info("OpenAI ChatGPT 모델 초기화 완료")
-    
-    return _llm_instance
+# LLM 유틸리티 임포트
+from .llm_utils import get_llm
 
 
 async def llm_parse_intent(state: ChatState) -> ChatState:

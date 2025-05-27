@@ -22,7 +22,7 @@ from ..streaming.message_types import (
     create_partial_response_message
 )
 from ..streaming.sse_manager import get_sse_manager
-from .llm_nodes import get_llm
+from .llm_utils import get_llm
 
 
 logger = logging.getLogger(__name__)
@@ -608,7 +608,6 @@ async def _analyze_required_tasks(user_request: str, completed_tool_calls: List,
 필요한 작업들:"""
 
     try:
-        from .llm_nodes import get_llm
         llm = get_llm()
         
         # LLM 호출
