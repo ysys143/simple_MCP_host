@@ -2,6 +2,42 @@
 
 > LangGraph와 Model Context Protocol을 활용한 지능형 AI 대화 시스템
 
+## 📚 프로젝트 개요
+
+**이 프로젝트는 Model Context Protocol(MCP)의 작동 방식을 이해하기 위한 교육용 데모 시스템입니다.**
+
+
+#### 📹 기본 사용법 데모
+<a href="https://youtu.be/mt0o0Dx6jOU" target="_blank">기본 사용법 데모 영상 보기</a>
+
+*기본적인 웹 UI 사용법과 AI와의 대화 과정을 보여주는 데모 영상입니다.*
+
+#### 📹 ReAct 모드 날씨 검색 데모
+<a href="https://youtu.be/yQQ5yKAIMTg" target="_blank">ReAct 모드 사용법 데모 영상 보기</a>
+
+*ReAct 패턴을 통한 복합적인 날씨 검색 및 리포트 생성 과정을 보여주는 데모 영상입니다. Think → Act → Observe 사이클을 통해 단계별로 정보를 수집하고 분석합니다.*
+
+#### 📹 Phoenix 모니터링 데모
+<a href="https://youtu.be/YWJDD2ldvsw" target="_blank">ReAct 모드 사용법 데모 영상 보기</a>
+
+*Phoenix UI를 통한 AI 애플리케이션 추적 및 성능 분석 과정을 보여주는 데모 영상입니다.*
+
+
+MCP는 AI 애플리케이션이 다양한 데이터 소스와 도구에 안전하고 표준화된 방식으로 연결할 수 있게 해주는 개방형 프로토콜입니다. 본 데모를 통해 다음을 학습할 수 있습니다:
+
+### 🎯 학습 목표
+- **MCP 프로토콜 이해**: 클라이언트-서버 아키텍처와 JSON-RPC 통신 방식
+- **실제 구현 체험**: LangChain MCP Adapters를 활용한 실제 MCP 클라이언트 구현
+- **다양한 MCP 서버 연동**: 더미 서버(교육용)와 실제 서버(Context7) 비교 체험
+- **LangGraph 워크플로우**: MCP 도구를 활용한 복잡한 AI 워크플로우 구성
+- **ReAct 패턴**: 도구 기반 추론 및 행동 패턴의 실제 적용
+
+### 🏗️ 교육적 구성
+- **3개의 MCP 서버**: 2개 더미 서버(학습용) + 1개 실제 서버(실용성)
+- **단계별 복잡도**: 단순 도구 호출 → ReAct 패턴 → 복합 워크플로우
+- **실시간 모니터링**: Phoenix를 통한 AI 애플리케이션 내부 동작 관찰
+- **완전한 소스코드**: 모든 구현 세부사항을 학습할 수 있는 오픈소스
+
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
 ![LangGraph](https://img.shields.io/badge/LangGraph-latest-orange.svg)
@@ -11,13 +47,14 @@
 ## 🌟 주요 기능
 
 - **🤖 실시간 AI 대화**: OpenAI GPT 모델을 활용한 자연스러운 대화
+- **⚡ SSE 실시간 스트리밍**: 토큰 단위 응답 스트리밍으로 즉시 반응하는 대화 경험
+- **💬 Multi-Turn 대화**: 세션 기반 컨텍스트 유지로 연속적이고 지능적인 대화 지원
 - **🔧 다중 도구 통합**: 날씨, 파일 관리, 문서 검색 등 다양한 MCP 서버 연동
 - **🔗 LangChain MCP 어댑터**: `langchain_mcp_adapters`를 통한 표준 MCP 프로토콜 지원
 - **🧠 ReAct 패턴**: 복잡한 요청에 대한 단계별 사고 및 행동 처리
-- **⚡ 실시간 스트리밍**: SSE를 통한 토큰 단위 응답 스트리밍
-- **🌐 웹 UI**: 직관적이고 현대적인 웹 인터페이스
-- **📊 세션 관리**: 대화 히스토리 및 컨텍스트 유지
-- **🔄 워크플로우 엔진**: LangGraph 기반 상태 관리 및 실행
+- **🌐 반응형 웹 UI**: 실시간 타이핑 효과와 워크플로우 추적이 가능한 현대적 인터페이스
+- **📊 지능형 세션 관리**: 대화 히스토리, 컨텍스트 요약, 도구 호출 결과 캐싱
+- **🔄 LangGraph 워크플로우**: 상태 기반 워크플로우 엔진으로 복잡한 작업 처리
 - **📈 Phoenix 모니터링**: AI 애플리케이션 추적 및 성능 분석 (선택적)
 
 ## 🔄 워크플로우 아키텍처
@@ -43,6 +80,99 @@
 - **종합 분석**: 수집된 정보를 바탕으로 최종 답변 생성
 - **예시**: 여러 위치 비교, 복합적인 분석 작업
 
+## 💬 실시간 대화 시스템
+
+### ⚡ SSE (Server-Sent Events) 스트리밍
+
+이 시스템은 **실시간 토큰 단위 스트리밍**을 통해 자연스러운 대화 경험을 제공합니다:
+
+#### 🔄 스트리밍 동작 방식
+- **즉시 응답 시작**: 사용자 메시지 전송 즉시 AI 응답이 토큰 단위로 스트리밍 시작
+- **실시간 타이핑 효과**: 마치 AI가 실시간으로 타이핑하는 것처럼 자연스러운 응답 표시
+- **중간 상태 표시**: ReAct 패턴에서 "생각 중...", "도구 호출 중..." 등의 중간 상태 실시간 표시
+- **에러 처리**: 연결 끊김이나 오류 발생 시 자동 재연결 및 복구
+
+#### 🛠️ 기술적 구현
+```javascript
+// 클라이언트 측 SSE 연결
+const eventSource = new EventSource(`/api/stream/${sessionId}`);
+eventSource.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+  // 실시간 UI 업데이트
+};
+```
+
+```python
+# 서버 측 스트리밍 응답
+async def stream_response():
+    async for chunk in workflow_stream:
+        yield f"data: {json.dumps(chunk)}\n\n"
+```
+
+### 🔄 Multi-Turn 대화 관리
+
+#### 📚 컨텍스트 유지 시스템
+- **세션 기반 메모리**: 각 사용자 세션별로 독립적인 대화 히스토리 관리
+- **장기 컨텍스트**: 이전 대화 내용을 기반으로 한 연속적인 대화 지원
+- **도구 호출 기록**: 이전에 사용한 도구와 결과를 기억하여 중복 호출 방지
+
+#### 🧠 지능형 컨텍스트 활용
+```python
+# 대화 예시
+사용자: "서울 날씨 알려줘"
+AI: "서울의 현재 날씨는 맑음, 기온 15°C입니다."
+
+사용자: "그럼 부산은 어때?"  # 이전 컨텍스트(날씨 조회) 자동 인식
+AI: "부산의 현재 날씨를 확인해드리겠습니다..."
+
+사용자: "두 도시 비교해줘"  # 서울과 부산 날씨 데이터 활용
+AI: "서울과 부산의 날씨를 비교하면..."
+```
+
+#### 🔍 스마트 참조 해결
+- **대명사 처리**: "그것", "저기", "이전 결과" 등의 모호한 참조를 컨텍스트 기반으로 해결
+- **암시적 요청**: 명시적으로 언급하지 않아도 이전 대화 흐름을 바탕으로 의도 파악
+- **연관 정보 활용**: 이전 도구 호출 결과를 새로운 요청에 자동 활용
+
+#### 📊 세션 상태 관리
+```python
+class ConversationSession:
+    """Multi-turn 대화를 위한 세션 관리 클래스"""
+    
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.messages: List[BaseMessage] = []  # 대화 히스토리
+        self.tool_results: Dict[str, Any] = {}  # 도구 호출 결과 캐시
+        self.context_summary: str = ""  # 장기 컨텍스트 요약
+        
+    async def add_message(self, message: BaseMessage):
+        """새 메시지 추가 및 컨텍스트 업데이트"""
+        self.messages.append(message)
+        await self._update_context()
+        
+    async def get_relevant_context(self, query: str) -> str:
+        """현재 쿼리와 관련된 컨텍스트 추출"""
+        # 의미적 유사도 기반 관련 대화 추출
+        # 최근 N개 메시지 + 관련성 높은 이전 대화
+```
+
+#### 🎯 컨텍스트 최적화
+- **토큰 효율성**: 중요한 정보만 선별하여 컨텍스트 윈도우 최적 활용
+- **요약 기능**: 긴 대화는 자동 요약하여 핵심 정보만 유지
+- **관련성 필터링**: 현재 요청과 관련 없는 이전 대화는 제외
+
+### 🌐 웹 UI 실시간 기능
+
+#### 📱 반응형 채팅 인터페이스
+- **실시간 타이핑 표시**: AI 응답 생성 중 타이핑 인디케이터 표시
+- **메시지 상태 표시**: 전송 중, 처리 중, 완료 상태 시각적 표시
+- **스크롤 자동 추적**: 새 메시지 도착 시 자동 스크롤
+- **연결 상태 모니터링**: SSE 연결 상태 실시간 표시
+
+#### 🔄 실시간 워크플로우 추적
+- **단계별 진행 표시**: ReAct 패턴의 Think → Act → Observe 단계 실시간 표시
+- **도구 호출 시각화**: 어떤 MCP 서버의 어떤 도구가 호출되는지 실시간 표시
+- **처리 시간 표시**: 각 단계별 소요 시간 측정 및 표시
 
 ## 🚀 빠른 시작
 
@@ -73,33 +203,6 @@ make run-bg
 
 ### 4. 웹 UI 접속
 브라우저에서 `http://localhost:8000`으로 접속하여 AI와 대화를 시작하세요!
-
-#### 📹 기본 사용법 데모
-<video width="800" controls>
-  <source src="docs/basic.mov" type="video/quicktime">
-  Your browser does not support the video tag.
-</video>
-
-*기본적인 웹 UI 사용법과 AI와의 대화 과정을 보여주는 데모 영상입니다. (파일 크기: 31MB)*
-
-#### 📹 ReAct 모드 날씨 검색 데모
-<video width="800" controls>
-  <source src="docs/react.mov" type="video/quicktime">
-  Your browser does not support the video tag.
-</video>
-
-*ReAct 패턴을 통한 복합적인 날씨 검색 및 리포트 생성 과정을 보여주는 데모 영상입니다. Think → Act → Observe 사이클을 통해 단계별로 정보를 수집하고 분석합니다. (파일 크기: 105MB)*
-
-### 5. Phoenix 모니터링 
-Phoenix를 활성화한 경우, 웹 UI 상단의 "Phoenix UI" 링크를 클릭하여 AI 추적 대시보드에 접속할 수 있습니다.
-
-#### 📹 Phoenix 모니터링 데모
-<video width="800" controls>
-  <source src="docs/phoenix.mov" type="video/quicktime">
-  Your browser does not support the video tag.
-</video>
-
-*Phoenix UI를 통한 AI 애플리케이션 추적 및 성능 분석 과정을 보여주는 데모 영상입니다. (파일 크기: 108MB)*
 
 ## 📦 설치 및 설정
 
@@ -173,22 +276,38 @@ Phoenix를 활성화한 경우, 웹 UI 상단의 "Phoenix UI" 링크를 클릭�
 - **종합 정보 수집**: "React와 Vue.js 라이브러리를 비교 분석해줘"
 
 ### 현재 구성된 MCP 서버들
-이 프로젝트는 다음 3개의 MCP 서버로 구성되어 있습니다:
+이 교육용 데모는 **학습 단계별로 설계된** 3개의 MCP 서버로 구성되어 있습니다:
 
-#### 🧪 더미 서버들 (테스트/데모용)
+#### 🧪 더미 서버들 (MCP 학습용)
+**목적**: MCP 프로토콜의 기본 동작 원리를 이해하기 위한 단순화된 서버
+
 - **Weather Server** (`examples/dummy_weather_server.py`)
+  - **학습 포인트**: 기본적인 MCP 서버 구현 방법, JSON-RPC 통신
   - 간단한 날씨 정보 제공 (하드코딩된 더미 데이터)
   - 도구: `get_weather`, `get_forecast`
+  - **교육적 가치**: FastMCP 라이브러리 사용법, 도구 정의 및 구현
   
 - **File Manager** (`examples/dummy_file_server.py`)
-  - 기본적인 파일 관리 기능 (읽기 전용)
+  - **학습 포인트**: 파일 시스템 연동, 보안 고려사항 (읽기 전용)
+  - 기본적인 파일 관리 기능 (안전한 읽기 전용 모드)
   - 도구: `list_files`, `read_file`, `file_info`
+  - **교육적 가치**: 환경변수 활용, 안전한 파일 접근 패턴
 
-#### 🌐 실제 서버
+#### 🌐 실제 서버 (실용성 체험)
+**목적**: 실제 운영 환경에서의 MCP 서버 활용 사례 체험
+
 - **Context7** (NPM 패키지: `@upstash/context7-mcp`)
+  - **학습 포인트**: 외부 MCP 서버 연동, 실제 데이터 처리
   - 실제 라이브러리 문서 검색 및 정보 제공
   - 온라인 문서 데이터베이스 연동
   - 도구: 라이브러리 검색, 문서 조회 등
+  - **교육적 가치**: 서드파티 MCP 서버 활용, 실제 API 연동 패턴
+
+#### 📖 학습 진행 순서 (권장)
+1. **Weather Server**: MCP 기본 개념 이해
+2. **File Manager**: 로컬 리소스 연동 방법 학습  
+3. **Context7**: 실제 외부 서비스 연동 체험
+4. **복합 시나리오**: 여러 서버를 조합한 ReAct 패턴 실습
 
 
 
@@ -196,20 +315,162 @@ Phoenix를 활성화한 경우, 웹 UI 상단의 "Phoenix UI" 링크를 클릭�
 
 ### API 엔드포인트
 
-#### 메시지 전송
+#### 📤 메시지 전송 API
 ```bash
 curl -X POST "http://localhost:8000/api/chat" \
   -H "Content-Type: application/json" \
   -d '{"message": "안녕하세요", "session_id": "test-session"}'
 ```
 
-#### SSE 스트리밍
+**응답 형식:**
+```json
+{
+  "status": "success",
+  "session_id": "test-session",
+  "message_id": "msg_123",
+  "timestamp": "2024-01-01T12:00:00Z"
+}
+```
+
+#### ⚡ SSE 스트리밍 API
+실시간 AI 응답을 받기 위한 Server-Sent Events 엔드포인트:
+
 ```javascript
+// 기본 SSE 연결
 const eventSource = new EventSource('/api/stream/test-session');
+
+// 이벤트 리스너 설정
 eventSource.onmessage = function(event) {
   const data = JSON.parse(event.data);
-  console.log(data);
+  handleStreamData(data);
 };
+
+eventSource.onerror = function(event) {
+  console.error('SSE 연결 오류:', event);
+  // 자동 재연결 로직
+};
+```
+
+**스트리밍 데이터 형식:**
+```json
+{
+  "type": "token",           // token, status, tool_call, error
+  "content": "안녕하세요",    // 실제 토큰 내용
+  "session_id": "test-session",
+  "message_id": "msg_123",
+  "timestamp": "2024-01-01T12:00:00.123Z",
+  "metadata": {
+    "node": "llm_response",  // 현재 실행 중인 워크플로우 노드
+    "step": 1,               // ReAct 패턴의 단계 번호
+    "total_tokens": 150      // 누적 토큰 수
+  }
+}
+```
+
+#### 🔄 스트리밍 이벤트 타입
+
+| 타입 | 설명 | 예시 |
+|------|------|------|
+| `token` | AI 응답 토큰 | `{"type": "token", "content": "안녕"}` |
+| `status` | 처리 상태 업데이트 | `{"type": "status", "content": "도구 호출 중..."}` |
+| `tool_call` | MCP 도구 호출 정보 | `{"type": "tool_call", "tool": "get_weather", "args": {...}}` |
+| `tool_result` | 도구 실행 결과 | `{"type": "tool_result", "result": {...}}` |
+| `thinking` | ReAct 사고 과정 | `{"type": "thinking", "content": "날씨 정보를 확인해야겠다"}` |
+| `error` | 오류 발생 | `{"type": "error", "message": "연결 실패"}` |
+| `complete` | 응답 완료 | `{"type": "complete", "final_response": "..."}` |
+
+#### 🛠️ 고급 SSE 사용법
+
+```javascript
+class MCPChatClient {
+  constructor(sessionId) {
+    this.sessionId = sessionId;
+    this.eventSource = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+  }
+  
+  connect() {
+    this.eventSource = new EventSource(`/api/stream/${this.sessionId}`);
+    
+    this.eventSource.onopen = () => {
+      console.log('SSE 연결 성공');
+      this.reconnectAttempts = 0;
+    };
+    
+    this.eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      this.handleMessage(data);
+    };
+    
+    this.eventSource.onerror = () => {
+      this.handleReconnect();
+    };
+  }
+  
+  handleMessage(data) {
+    switch(data.type) {
+      case 'token':
+        this.appendToken(data.content);
+        break;
+      case 'status':
+        this.updateStatus(data.content);
+        break;
+      case 'tool_call':
+        this.showToolCall(data.tool, data.args);
+        break;
+      case 'thinking':
+        this.showThinking(data.content);
+        break;
+      case 'complete':
+        this.onComplete(data.final_response);
+        break;
+      case 'error':
+        this.handleError(data.message);
+        break;
+    }
+  }
+  
+  handleReconnect() {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      setTimeout(() => {
+        this.reconnectAttempts++;
+        this.connect();
+      }, 1000 * Math.pow(2, this.reconnectAttempts)); // 지수 백오프
+    }
+  }
+}
+```
+
+#### 📊 세션 관리 API
+
+```bash
+# 새 세션 생성
+curl -X POST "http://localhost:8000/api/sessions" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "user123"}'
+
+# 세션 정보 조회
+curl "http://localhost:8000/api/sessions/test-session"
+
+# 세션 히스토리 조회
+curl "http://localhost:8000/api/sessions/test-session/history"
+
+# 세션 삭제
+curl -X DELETE "http://localhost:8000/api/sessions/test-session"
+```
+
+#### 🔍 시스템 상태 API
+
+```bash
+# MCP 서버 상태 확인
+curl "http://localhost:8000/api/status/mcp-servers"
+
+# 사용 가능한 도구 목록
+curl "http://localhost:8000/api/tools"
+
+# 시스템 헬스체크
+curl "http://localhost:8000/health"
 ```
 
 ## 📁 프로젝트 구조
@@ -433,26 +694,35 @@ tail -f logs/server.log
 
 ## 🚀 향후 추가 예정 기능
 
-### 📊 MCP 서버 모니터링 대시보드
+### 📚 교육 기능 강화
+
+#### 🎓 MCP 학습 모드
+- **단계별 튜토리얼**: MCP 프로토콜 학습을 위한 가이드 모드
+- **코드 설명 오버레이**: 실행 중인 MCP 통신 과정을 코드와 함께 설명
+- **인터랙티브 문서**: 실제 동작하는 예제와 함께하는 MCP 가이드
+
+#### 📊 MCP 서버 모니터링 대시보드 (교육용)
 - **서버 상태 상세 보기**: 현재 '서버 3개 - 도구 7개' 표시를 클릭하면 상세 정보 확인
   - 각 MCP 서버별 연결 상태 및 초기화 진행 상황
   - 서버별 사용 가능한 도구 목록과 설명
   - 실시간 서버 헬스체크 및 응답 시간
   - 도구별 호출 횟수 및 성공/실패 통계
+- **학습 관점**: MCP 서버 생명주기와 상태 관리 이해
 
-### 🔍 실시간 데이터 통신 모니터링
+#### 🔍 실시간 데이터 통신 모니터링 (교육용)
 - **통합 개발자 뷰**: 챗봇 화면과 동일한 인터페이스에서 데이터 흐름 확인
-  - JSON-RPC 요청/응답 실시간 표시
-  - MCP 프로토콜 메시지 추적
-  - LangGraph 워크플로우 상태 변화 시각화
-  - ReAct 패턴 사고 과정 단계별 표시
-  - 토큰 사용량 및 API 호출 비용 추적
+  - **JSON-RPC 요청/응답 실시간 표시**: MCP 프로토콜 메시지 구조 학습
+  - **MCP 프로토콜 메시지 추적**: 표준 메시지 형식과 흐름 이해
+  - **LangGraph 워크플로우 상태 변화 시각화**: 상태 기반 워크플로우 학습
+  - **ReAct 패턴 사고 과정 단계별 표시**: AI 추론 과정 시각화
+  - **토큰 사용량 및 API 호출 비용 추적**: 실제 운영 비용 이해
 - **Phoenix 통합 강화**: 현재 별도 창에서 제공되는 Phoenix UI를 메인 인터페이스에 통합
 
 ### 🎯 추가 계획 기능
-- **커스텀 MCP 서버 추가**: 웹 UI에서 새로운 서버 설정 및 테스트
+- **커스텀 MCP 서버 추가**: 웹 UI에서 새로운 서버 설정 및 테스트 (학습자가 직접 MCP 서버 구성 체험)
 - **워크플로우 추적 기능**: 실행 중인 LangGraph 노드의 플로우를 실시간으로 추적 및 시각화
 - **대화 히스토리 관리**: 세션별 대화 저장 및 검색
+- **MCP 서버 개발 도구**: 새로운 MCP 서버 개발을 위한 템플릿과 테스트 도구
 ---
 
 **Made with ❤️ using LangGraph and MCP** 
