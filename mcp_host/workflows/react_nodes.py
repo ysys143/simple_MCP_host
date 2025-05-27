@@ -111,6 +111,7 @@ async def react_think_node(state: ChatState) -> ChatState:
         logger.info(f"미완료 작업 확인 결과: {remaining_tasks}")
         
         # 미완료 작업이 실제로 있는지 확인 (빈 리스트이거나 ['없음']이면 완료된 것으로 간주)
+        # 도구 호출이 필요하지 않은 작업들(분석, 비교, 리포트 작성 등)은 제외
         has_remaining_tasks = (
             remaining_tasks and 
             remaining_tasks != ['없음'] and 
@@ -118,9 +119,22 @@ async def react_think_node(state: ChatState) -> ChatState:
                    '추가 작업 필요 없음' in task.strip() or
                    '이미' in task.strip() and '완료' in task.strip() or
                    '수집 완료' in task.strip() or
-                   '도구가 아닌 직접 수행' in task.strip()
+                   '도구가 아닌 직접 수행' in task.strip() or
+                   # 도구 호출이 필요하지 않은 작업들 필터링
+                   any(keyword in task.strip() for keyword in [
+                       '비교 분석', '분석', '비교', '리포트 작성', '요약', '정리',
+                       '종합', '검토', '평가', '결론', '최종 답변', '답변 작성'
+                   ])
                    for task in remaining_tasks)
         )
+        
+        # 최대 반복 횟수 체크 (무한 루프 방지)
+        max_iterations = 15  # 최대 15회 반복
+        if iteration >= max_iterations:
+            logger.warning(f"최대 반복 횟수({max_iterations}) 도달로 ReAct 종료")
+            state["react_should_continue"] = False
+            state["next_step"] = "react_finalize"
+            return state
         
         # 종료 조건 체크
         if has_remaining_tasks:
@@ -629,7 +643,7 @@ async def _analyze_required_tasks(user_request: str, completed_tool_calls: List,
             logger.warning(f"도구 정보 수집 실패: {e}")
     
     # LLM을 사용한 작업 분석 프롬프트
-    analysis_prompt = f"""사용자 요청을 분석하여 필요한 모든 작업을 파악해주세요.
+    analysis_prompt = f"""사용자 요청을 분석하여 **도구 호출이 필요한** 작업만 파악해주세요.
 
 사용자 요청: "{user_request}"
 
@@ -639,22 +653,29 @@ async def _analyze_required_tasks(user_request: str, completed_tool_calls: List,
 이미 완료된 작업들:
 {chr(10).join([f"- {task}" for task in completed_tasks]) if completed_tasks else "완료된 작업 없음"}
 
-다음 지침에 따라 필요한 작업들을 나열해주세요:
+다음 지침에 따라 **도구 호출이 필요한** 작업들만 나열해주세요:
 
 1. 사용자 요청을 자세히 분석하세요
-2. 여러 항목(도시, 기술, 파일 등)이 언급되었다면 각각에 대해 별도 작업이 필요합니다
-3. 비교나 분석이 요청되었다면 모든 개별 정보를 먼저 수집해야 합니다
+2. 여러 항목(도시, 기술, 파일 등)이 언급되었다면 각각에 대해 별도 도구 호출이 필요합니다
+3. **중요**: 다음은 도구 호출이 아닌 LLM이 직접 수행할 수 있는 작업이므로 제외하세요:
+   - 분석, 비교, 요약, 정리, 종합
+   - 리포트 작성, 답변 작성
+   - 검토, 평가, 결론 도출
 4. 이미 완료된 작업은 제외하세요
 5. 사용 가능한 도구를 고려하여 실행 가능한 작업만 나열하세요
+6. 모든 필요한 데이터가 이미 수집되었다면 "없음"으로 응답하세요
 
 응답 형식:
 필요한 작업들:
-- [구체적인 작업 1]
-- [구체적인 작업 2]
-- [구체적인 작업 3]
+- [구체적인 도구 호출 작업 1]
+- [구체적인 도구 호출 작업 2]
 ...
 
-⚠️ 중요: 사용자가 요청한 모든 항목을 빠뜨리지 마세요!
+또는 도구 호출이 더 이상 필요하지 않다면:
+필요한 작업들:
+- 없음
+
+⚠️ 중요: 도구 호출이 필요한 작업만 나열하세요!
 
 필요한 작업들:"""
 

@@ -97,7 +97,7 @@ async def call_mcp_tool(state: ChatState) -> ChatState:
         )
         
         # 실제 MCP 클라이언트를 통한 도구 호출
-        if hasattr(mcp_client, 'call_tool'):
+        if mcp_client and hasattr(mcp_client, 'call_tool'):
             try:
                 start_time = datetime.now()
                 
@@ -121,9 +121,13 @@ async def call_mcp_tool(state: ChatState) -> ChatState:
                 tool_call.error = str(e)
                 tool_call.execution_time_ms = 0
         else:
-            # MCP 클라이언트가 없는 경우
-            logger.warning("MCP 클라이언트가 없습니다")
-            tool_call.error = "MCP 클라이언트가 초기화되지 않았습니다"
+            # MCP 클라이언트가 없거나 call_tool 메서드가 없는 경우
+            if not mcp_client:
+                logger.warning("MCP 클라이언트가 상태에 없습니다")
+                tool_call.error = "MCP 클라이언트가 상태에 전달되지 않았습니다"
+            else:
+                logger.warning(f"MCP 클라이언트에 call_tool 메서드가 없습니다. 타입: {type(mcp_client)}")
+                tool_call.error = "MCP 클라이언트가 올바르게 초기화되지 않았습니다"
             tool_call.execution_time_ms = 0
         
         # tool_calls 리스트에 추가 (LLM이 참조할 수 있도록)

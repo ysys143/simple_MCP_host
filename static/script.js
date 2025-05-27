@@ -564,19 +564,15 @@ function updateConnectionStatus(status, text) {
         
         // 수동 연결/해제 버튼 표시 제어
         const manualConnectBtn = document.getElementById('manualConnectBtn');
-        const manualDisconnectBtn = document.getElementById('manualDisconnectBtn');
         
-        if (manualConnectBtn && manualDisconnectBtn) {
+        if (manualConnectBtn) {
             if (status === 'connected') {
                 manualConnectBtn.style.display = 'none';
-                manualDisconnectBtn.style.display = 'inline-block';
             } else if (status === 'failed' || status === 'disconnected') {
                 manualConnectBtn.style.display = 'inline-block';
-                manualDisconnectBtn.style.display = 'none';
             } else {
-                // 연결 중이거나 재연결 중일 때는 둘 다 숨김
+                // 연결 중이거나 재연결 중일 때는 숨김
                 manualConnectBtn.style.display = 'none';
-                manualDisconnectBtn.style.display = 'none';
             }
         }
         

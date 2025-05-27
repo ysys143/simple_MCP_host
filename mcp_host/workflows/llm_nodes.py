@@ -136,13 +136,29 @@ REASONING: 사용자가 부산의 날씨 정보를 요청했습니다.
         parsed_intent = _parse_llm_intent_response(response_text, user_input)
         state["parsed_intent"] = parsed_intent
         
-        # 복잡한 요청 감지 및 ReAct 모드 전환
+        # 복잡한 요청 감지 (ReAct 모드 전환 여부 결정)
+        user_input_clean = user_input.strip()
         user_input_lower = user_input_clean.lower()
+        
+        # 디버깅 정보 추가
+        comma_count = len(re.findall(r'[,，]', user_input_clean))
+        keyword_matches = [keyword for keyword in ['비교', '분석', '리포트', '여러', '모든', '각각'] if keyword in user_input_lower]
+        korean_word_groups = re.findall(r'[가-힣]{2,}(?:\\s*,\\s*[가-힣]{2,}){2,}', user_input_clean)
+        
+        logger.info(f"복잡한 요청 감지 분석:")
+        logger.info(f"  입력: '{user_input_clean}'")
+        logger.info(f"  쉼표 개수: {comma_count}")
+        logger.info(f"  키워드 매치: {keyword_matches}")
+        logger.info(f"  한국어 단어 그룹: {korean_word_groups}")
+        
+        # 더 엄격한 복잡한 요청 감지 조건
         is_complex_request = (
-            len(re.findall(r'[,，]', user_input_clean)) >= 2 or  # 쉼표가 2개 이상
-            any(keyword in user_input_lower for keyword in ['비교', '분석', '리포트', '여러', '모든', '각각']) or
-            len(re.findall(r'[가-힣]{2,}(?:\s*,\s*[가-힣]{2,}){2,}', user_input_clean)) > 0  # 3개 이상의 한국어 단어가 쉼표로 구분
+            comma_count >= 3 or  # 쉼표가 3개 이상 (더 엄격)
+            (len(keyword_matches) > 0 and comma_count >= 1) or  # 키워드가 있고 쉼표도 있는 경우
+            len(korean_word_groups) > 0  # 3개 이상의 한국어 단어가 쉼표로 구분
         )
+        
+        logger.info(f"  복잡한 요청 여부: {is_complex_request}")
         
         if is_complex_request and not state.get("react_mode"):
             logger.info(f"복잡한 요청 감지 - ReAct 모드로 전환: {user_input_clean}")
@@ -197,7 +213,14 @@ async def llm_call_mcp_tool(state: ChatState) -> ChatState:
         if not parsed_intent:
             raise ValueError("파싱된 의도가 없습니다")
         
-        logger.info(f"LLM MCP 도구 호출: {parsed_intent.target_server}.{parsed_intent.target_tool}")
+        # MCP 클라이언트 상태 확인
+        mcp_client = state.get("mcp_client")
+        logger.info(f"LLM MCP 도구 호출 시작:")
+        logger.info(f"  대상: {parsed_intent.target_server}.{parsed_intent.target_tool}")
+        logger.info(f"  MCP 클라이언트 존재: {mcp_client is not None}")
+        if mcp_client:
+            logger.info(f"  MCP 클라이언트 타입: {type(mcp_client)}")
+            logger.info(f"  call_tool 메서드 존재: {hasattr(mcp_client, 'call_tool')}")
         
         # 도구 호출 전 상태 확인
         logger.info(f"도구 호출 전 tool_calls 길이: {len(state.get('tool_calls', []))}")
@@ -218,6 +241,7 @@ async def llm_call_mcp_tool(state: ChatState) -> ChatState:
         
     except Exception as e:
         logger.error(f"LLM MCP 도구 호출 오류: {e}")
+        logger.exception("LLM MCP 도구 호출 상세 오류:")
         set_error(state, f"도구 호출 실패: {e}")
         return state
 
