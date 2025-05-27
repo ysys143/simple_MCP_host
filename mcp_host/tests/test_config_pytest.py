@@ -18,7 +18,10 @@ class TestMCPConfig:
         
     def test_load_servers(self, config_manager):
         """서버 설정 로드 테스트"""
-        servers = config_manager.load_servers("mcp_servers.json")
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        servers = config_manager.load_servers(config_path)
         
         assert isinstance(servers, dict)
         assert len(servers) >= 2  # weather, file-manager
@@ -28,7 +31,10 @@ class TestMCPConfig:
     def test_get_individual_server(self, config_manager):
         """개별 서버 조회 테스트"""
         # 설정 로드
-        config_manager.load_servers("mcp_servers.json")
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        config_manager.load_servers(config_path)
         
         # weather 서버 조회
         weather_server = config_manager.get_server("weather")

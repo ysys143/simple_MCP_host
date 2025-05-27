@@ -26,8 +26,29 @@ MCP_test/
 
 ## 설치 및 실행
 
+### 1. 의존성 설치
 ```bash
 pip install -r requirements.txt
+```
+
+### 2. 환경변수 설정
+`.env_example` 파일을 `.env`로 복사하고 실제 값으로 수정하세요:
+
+```bash
+cp .env_example .env
+```
+
+필수 환경변수:
+- `OPENAI_API_KEY`: OpenAI API 키
+
+선택적 환경변수:
+- `OPENAI_MODEL`: 사용할 모델명 (기본값: gpt-4.1)
+- `OPENAI_TEMPERATURE`: 모델 온도 (기본값: 0.1)
+- `OPENAI_MAX_TOKENS`: 최대 토큰 수 (기본값: 1000)
+- `MCP_SERVERS_CONFIG`: MCP 서버 설정 파일 경로 (기본값: ./mcp_servers.json)
+
+### 3. 실행
+```bash
 python -m mcp_host.main
 ```
 

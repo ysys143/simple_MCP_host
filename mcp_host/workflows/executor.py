@@ -193,8 +193,11 @@ class MCPWorkflowExecutor:
                 if context:
                     initial_state["context"].update(context)
                 
-                # ReAct 워크플로우 실행
-                result = await react_workflow.ainvoke(initial_state)
+                # ReAct 워크플로우 실행 (재귀 한계 설정)
+                result = await react_workflow.ainvoke(
+                    initial_state,
+                    config={"recursion_limit": 50}
+                )
                 
                 # 결과 정리
                 parsed_intent = result.get("parsed_intent")

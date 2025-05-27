@@ -59,11 +59,11 @@ async def react_think_node(state: ChatState) -> ChatState:
     session_id = state.get("session_id")
     iteration = state.get("react_iteration", 0)
     
-    # SSE 메시지 전송
-    if session_id:
+    # 첫 번째 반복에서만 시작 메시지 전송
+    if session_id and iteration == 0:
         sse_manager = get_sse_manager()
         thinking_msg = create_thinking_message(
-            f"생각하는 중... (단계 {iteration + 1})",
+            f"요청을 분석하고 있습니다...",
             session_id,
             iteration=iteration + 1
         )
@@ -87,32 +87,66 @@ async def react_think_node(state: ChatState) -> ChatState:
         # 생각 내용 파싱
         parsed_thought = _parse_thought_response(thought_content)
         
-        # 사고 과정을 SSE로 전송
+        # 의미있는 사고 과정만 SSE로 전송 (너무 짧거나 반복적인 내용 제외)
         if session_id and parsed_thought.get("thought"):
-            sse_manager = get_sse_manager()
-            thinking_detail_msg = create_thinking_message(
-                f"사고: {parsed_thought['thought']}",
-                session_id,
-                iteration=iteration + 1
-            )
-            await sse_manager.send_to_session(session_id, thinking_detail_msg)
+            thought_content = parsed_thought['thought']
+            # 의미있는 사고 과정만 전송 (10글자 이상, 반복적인 표현 제외)
+            if (len(thought_content) > 10 and 
+                not any(skip_word in thought_content for skip_word in ['생각하는 중', '분석 중', '처리 중'])):
+                sse_manager = get_sse_manager()
+                thinking_detail_msg = create_thinking_message(
+                    f"분석: {thought_content}",
+                    session_id,
+                    iteration=iteration + 1
+                )
+                await sse_manager.send_to_session(session_id, thinking_detail_msg)
         
         # 상태 업데이트
         state["react_thought"] = thought_content
         state["react_current_step"] = "think"
         state["react_iteration"] = iteration + 1
         
+        # 미완료 작업 확인 (최우선)
+        remaining_tasks = await _check_remaining_tasks(state)
+        logger.info(f"미완료 작업 확인 결과: {remaining_tasks}")
+        
+        # 미완료 작업이 실제로 있는지 확인 (빈 리스트이거나 ['없음']이면 완료된 것으로 간주)
+        has_remaining_tasks = (
+            remaining_tasks and 
+            remaining_tasks != ['없음'] and 
+            not all(task.strip() in ['없음', '', '(추가 작업 필요 없음)', '수집된 정보를 바탕으로'] or 
+                   '추가 작업 필요 없음' in task.strip() or
+                   '이미' in task.strip() and '완료' in task.strip() or
+                   '수집 완료' in task.strip() or
+                   '도구가 아닌 직접 수행' in task.strip()
+                   for task in remaining_tasks)
+        )
+        
         # 종료 조건 체크
-        if parsed_thought.get("final_answer"):
+        if has_remaining_tasks:
+            # 미완료 작업이 있으면 무조건 계속 진행
+            logger.info(f"미완료 작업이 있어 계속 진행: {remaining_tasks}")
+            if parsed_thought.get("action"):
+                state["react_action"] = parsed_thought["action"]
+            else:
+                # 행동이 명시되지 않았지만 미완료 작업이 있으면 첫 번째 작업을 행동으로 설정
+                state["react_action"] = remaining_tasks[0] if remaining_tasks else "continue"
+            state["react_should_continue"] = True
+            state["next_step"] = "react_act"
+        elif parsed_thought.get("final_answer"):
+            # 미완료 작업이 없고 최종 답변이 있으면 종료
+            logger.info("미완료 작업이 없고 최종 답변이 있어 종료")
             state["react_final_answer"] = parsed_thought["final_answer"]
             state["react_should_continue"] = False
             state["next_step"] = "react_finalize"
         elif parsed_thought.get("action"):
+            # 미완료 작업이 없지만 행동이 있으면 실행
             state["react_action"] = parsed_thought["action"]
             state["react_should_continue"] = True
             state["next_step"] = "react_act"
         else:
-            # 행동이 명시되지 않았으면 일반 응답으로 처리
+            # 미완료 작업도 없고 행동도 명시되지 않았으면 종료
+            logger.info("미완료 작업과 행동이 모두 없어 종료")
             state["react_should_continue"] = False
             state["next_step"] = "react_finalize"
         
@@ -1063,9 +1097,83 @@ def _format_tool_result(tool_call: MCPToolCall) -> str:
         return f"도구 '{tool_call.tool_name}' 실행 실패: {tool_call.error}"
 
 
+async def _check_remaining_tasks(state: ChatState) -> List[str]:
+    """아직 완료되지 않은 작업들을 확인합니다"""
+    user_message = state.get("current_message")
+    completed_tool_calls = state.get("tool_calls", [])
+    mcp_client = state.get("mcp_client")
+    
+    if not user_message:
+        return []
+    
+    try:
+        # 필요한 작업들을 다시 분석
+        required_tasks_text = await _analyze_required_tasks(
+            user_message.content, 
+            completed_tool_calls, 
+            mcp_client
+        )
+        
+        # "필요한 작업들:" 섹션에서 작업 목록 추출
+        if "필요한 작업들:" in required_tasks_text:
+            tasks_section = required_tasks_text.split("필요한 작업들:")[-1].strip()
+            
+            # 각 라인에서 작업 추출 (- 로 시작하는 라인들)
+            remaining_tasks = []
+            for line in tasks_section.split('\n'):
+                line = line.strip()
+                if line.startswith('-') and len(line) > 2:
+                    task = line[1:].strip()  # - 제거
+                    if task and not task.startswith('⚠️'):  # 경고 메시지 제외
+                        remaining_tasks.append(task)
+            
+            logger.info(f"미완료 작업 확인 결과: {remaining_tasks}")
+            return remaining_tasks
+        
+        return []
+        
+    except Exception as e:
+        logger.error(f"미완료 작업 확인 중 오류: {e}")
+        return []
+
+
 def _should_continue_react(state: ChatState) -> bool:
     """ReAct 사이클을 계속 진행할지 결정합니다"""
-    # 최근 관찰들에서 진전이 없으면 종료
+    
+    # 1. 최우선: 미완료 작업 확인
+    try:
+        # 비동기 함수를 동기적으로 호출하기 위해 이벤트 루프 사용
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            remaining_tasks = loop.run_until_complete(_check_remaining_tasks(state))
+        except RuntimeError:
+            # 이미 실행 중인 이벤트 루프가 있는 경우
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, _check_remaining_tasks(state))
+                remaining_tasks = future.result(timeout=10)
+        
+        if remaining_tasks:
+            logger.info(f"미완료 작업이 있어 ReAct 계속 진행: {remaining_tasks}")
+            return True
+        else:
+            logger.info("모든 필요한 작업이 완료되어 ReAct 종료")
+            return False
+            
+    except Exception as e:
+        logger.error(f"미완료 작업 확인 중 오류: {e}")
+        # 오류 시 기존 로직으로 폴백
+    
+    # 2. 폴백: 최근 성공적인 도구 호출이 있었다면 보수적으로 판단
+    tool_calls = state.get("tool_calls", [])
+    recent_successful_calls = [tc for tc in tool_calls[-2:] if tc.is_successful()]
+    
+    if recent_successful_calls:
+        logger.info("최근 성공적인 도구 호출이 있었지만 미완료 작업 확인 실패로 보수적 종료")
+        return False
+    
+    # 3. 기존 유사도 기반 무한루프 방지 (실패 케이스에만 적용)
     messages = state.get("messages", [])
     recent_observations = [
         msg for msg in messages[-4:] 
@@ -1073,28 +1181,27 @@ def _should_continue_react(state: ChatState) -> bool:
     ]
     
     if len(recent_observations) >= 2:
-        # 연속된 관찰에서 내용이 매우 유사하면 종료
+        # 연속된 관찰에서 내용이 매우 유사하면 종료 (실패 케이스 감지)
         last_obs = recent_observations[-1].content
         prev_obs = recent_observations[-2].content
         
-        if len(last_obs) > 0 and len(prev_obs) > 0:
-            # 동적 유사도 체크 (길이 기반 적응적 임계값)
-            last_words = set(last_obs.split())
-            prev_words = set(prev_obs.split())
-            
-            if last_words and prev_words:
-                intersection = len(last_words & prev_words)
-                union = len(last_words | prev_words)
+        # 실패 메시지가 반복되는 경우만 체크
+        if ("실패" in last_obs or "오류" in last_obs) and ("실패" in prev_obs or "오류" in prev_obs):
+            if len(last_obs) > 0 and len(prev_obs) > 0:
+                last_words = set(last_obs.split())
+                prev_words = set(prev_obs.split())
                 
-                # Jaccard 유사도 계산
-                jaccard_similarity = intersection / union if union > 0 else 0
-                
-                # 적응적 임계값 (짧은 텍스트일수록 높은 임계값)
-                adaptive_threshold = min(0.9, 0.7 + (20 / max(len(last_words), len(prev_words))))
-                
-                if jaccard_similarity > adaptive_threshold:
-                    return False
+                if last_words and prev_words:
+                    intersection = len(last_words & prev_words)
+                    union = len(last_words | prev_words)
+                    
+                    jaccard_similarity = intersection / union if union > 0 else 0
+                    
+                    if jaccard_similarity > 0.8:  # 실패 케이스에만 엄격한 기준 적용
+                        logger.info("연속된 실패로 인한 ReAct 종료")
+                        return False
     
+    # 기본적으로 계속 진행
     return True
 
 

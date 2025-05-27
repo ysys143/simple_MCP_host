@@ -75,9 +75,13 @@ class MCPHostApp:
             await initialize_session_manager()
             self._logger.info("세션 관리자 초기화 완료")
             
-            # Enhanced MCP Client 초기화 (JSON 파일 직접 사용)
+            # Enhanced MCP Client 초기화 (환경변수 설정 모듈 사용)
             self.mcp_client = EnhancedMCPClient()
-            await self.mcp_client.initialize("mcp_servers.json")
+            # MCP 클라이언트 초기화 (환경변수 설정 모듈에서 설정 파일 경로 가져오기)
+            from ..config.env_config import get_settings
+            settings = get_settings()
+            config_path = settings.get_mcp_servers_config_path()
+            await self.mcp_client.initialize(config_path)
             
             # 도구 로드 확인
             tools = self.mcp_client.get_tools()

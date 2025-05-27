@@ -110,12 +110,16 @@ class MCPConfigManager:
         try:
             config_data = self._config_reader.read_servers_config(config_path)
             
-            if 'servers' not in config_data:
-                raise ValueError("설정 파일에 'servers' 섹션이 없습니다")
+            # 두 가지 형식 지원: {"servers": {...}} 또는 직접 {...}
+            if 'servers' in config_data:
+                servers_data = config_data['servers']
+            else:
+                # 최상위가 서버 설정인 경우 (현재 mcp_servers.json 형식)
+                servers_data = config_data
             
             self._servers.clear()
             
-            for server_name, server_config in config_data['servers'].items():
+            for server_name, server_config in servers_data.items():
                 self._servers[server_name] = self._create_server_config(
                     server_name, server_config
                 )

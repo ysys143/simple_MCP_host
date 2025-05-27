@@ -25,7 +25,10 @@ def test_config_system():
         print("1. 설정 관리자 생성 완료")
         
         # 설정 파일 로드
-        servers = config_manager.load_servers("mcp_servers.json")
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        servers = config_manager.load_servers(config_path)
         print(f"2. 설정 파일 로드 완료 - {len(servers)}개 서버 발견")
         
         # 서버 목록 출력

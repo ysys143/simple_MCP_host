@@ -19,6 +19,9 @@ let currentReActContainer = null; // ReAct 과정 컨테이너 추적
 let currentRequestReActMode = false; // 현재 요청의 ReAct 모드 상태 추적
 let timeoutId = null; // 타임아웃 ID 저장
 let isPhoenixLinkActivatedByChat = false; // Phoenix UI 링크 활성화 상태 추적 (채팅 기반)
+let currentReActStepsContainer = null; // ReAct 단계 컨테이너 추적
+let currentStepIndex = 1; // 현재 단계 인덱스
+let isRespondingToUser = false; // 사용자 응답 상태 추적
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
@@ -972,39 +975,13 @@ function handleReActStep(data) {
         const stepDiv = document.createElement('div');
         stepDiv.className = `react-step react-acting react-step-${currentStepIndex}`;
         
-        const actionDetails = data.metadata && data.metadata.action_details ? data.metadata.action_details : undefined;
-        
-        let toolNameForDisplay = "알 수 없는 도구";
-        let argumentsForDisplay = {};
-
-        if (actionDetails && typeof actionDetails === 'object') {
-            if (actionDetails.tool_name) toolNameForDisplay = actionDetails.tool_name;
-            if (actionDetails.parsed_arguments) argumentsForDisplay = actionDetails.parsed_arguments;
-        }
-
-        const jsonRpcRequest = {
-            jsonrpc: "2.0",
-            id: `react-act-${Date.now()}`,
-            method: "tools/call",
-            params: { name: toolNameForDisplay, arguments: argumentsForDisplay }
-        };
-
         let actingContentHtml = `
             <div class="react-step-header">
                 <span class="react-step-icon">🚀</span>
                 <span class="react-step-title">행동 실행 중: ${escapeHtml(data.content)}</span>
             </div>
             <div class="react-step-content">
-        `;
-
-        // // DEBUG: Display raw actionDetails directly in the UI
-        // const debugPreText = 'DEBUG data.action_details: ' + JSON.stringify(actionDetails, null, 2);
-        // actingContentHtml += `<pre style="white-space: pre-wrap; word-break: break-all; background-color: #f0f0f0; padding: 8px; border: 1px solid #ccc; margin-top: 5px; margin-bottom: 5px;">${escapeHtml(debugPreText)}</pre>`;
-        
-        // MCP 도구 호출 요청 JSON 표시 부분 (주석 해제)
-        actingContentHtml += `
-                <h3 style="font-size: 0.9em; margin-top: 10px; margin-bottom: 5px;">MCP 도구 호출 요청</h3>
-                ${createCollapsibleJson(JSON.stringify(jsonRpcRequest, null, 2), `MCP 도구 호출 요청 (${toolNameForDisplay})`, true)}
+                <p>도구를 호출하고 있습니다...</p>
             </div>
         `;
         stepDiv.innerHTML = actingContentHtml;
@@ -1014,17 +991,39 @@ function handleReActStep(data) {
         const stepDiv = document.createElement('div');
         stepDiv.className = `react-step react-observing react-step-${currentStepIndex}`;
 
-        const actualRequestJson = data.observation_data?.actual_mcp_request_json;
-        const actualResponseJson = data.observation_data?.actual_mcp_response_json;
+        const observationData = data.metadata?.observation_data || data.observation_data;
+        const actualRequestJson = observationData?.actual_mcp_request_json;
+        const actualResponseJson = observationData?.actual_mcp_response_json;
+        
         const toolNameFromObservation = actualRequestJson ? JSON.parse(actualRequestJson).params.name : "알 수 없는 도구";
 
-        let observationDisplay = `<div class="react-observation-text">${renderMarkdown(data.content)}</div>`;
+        // 일반 모드와 동일한 tool-call 스타일 사용
+        let toolCallHtml = '';
+        
+        // 1. MCP 도구 호출 요청
         if (actualRequestJson) {
-            observationDisplay += createCollapsibleJson(actualRequestJson, `실제 MCP 요청 (${toolNameFromObservation})`, true);
+            const formattedRequestJson = JSON.stringify(JSON.parse(actualRequestJson), null, 2);
+            toolCallHtml += `
+                <div class="tool-call success">
+                    <div style="font-weight: bold; margin-bottom: 8px;">🔧 MCP 도구 호출 요청 (서버: weather)</div>
+                    ${createCollapsibleJson(formattedRequestJson, 'JSON-RPC 요청')}
+                </div>
+            `;
         }
+        
+        // 2. MCP 도구 호출 응답
         if (actualResponseJson) {
-            observationDisplay += createCollapsibleJson(actualResponseJson, `실제 MCP 응답 (${toolNameFromObservation})`, true);
+            const formattedResponseJson = JSON.stringify(JSON.parse(actualResponseJson), null, 2);
+            toolCallHtml += `
+                <div class="tool-call success">
+                    <div style="font-weight: bold; margin-bottom: 8px;">📤 MCP 도구 호출 응답</div>
+                    ${createCollapsibleJson(formattedResponseJson, 'JSON-RPC 응답')}
+                </div>
+            `;
         }
+        
+        // 3. 관찰 결과
+        const observationText = `<div class="react-observation-text">${renderMarkdown(data.content)}</div>`;
 
         stepDiv.innerHTML = `
             <div class="react-step-header">
@@ -1032,7 +1031,8 @@ function handleReActStep(data) {
                 <span class="react-step-title">관찰</span>
             </div>
             <div class="react-step-content">
-                ${observationDisplay}
+                ${toolCallHtml}
+                ${observationText}
             </div>
         `;
         currentReActStepsContainer.appendChild(stepDiv);

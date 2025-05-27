@@ -36,13 +36,17 @@ async def test_enhanced_client():
         print("1. 설정 관리자 생성 완료")
         
         # 2. 향상된 클라이언트 생성
-        client = create_enhanced_client(config_manager)
+        client = create_enhanced_client()
         print("2. 향상된 MCP 클라이언트 생성 완료")
         
         # 3. 비동기 컨텍스트 매니저로 클라이언트 사용
         async with client:
             # 초기화
-            await client.initialize("mcp_servers.json")
+            # 환경변수 설정 모듈에서 설정 파일 경로 가져오기
+            from mcp_host.config.env_config import get_settings
+            settings = get_settings()
+            config_path = settings.get_mcp_servers_config_path()
+            await client.initialize(config_path)
             print("3. 클라이언트 초기화 완료")
             
             # 서버 정보 확인

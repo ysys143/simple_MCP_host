@@ -21,7 +21,11 @@ async def test_enhanced_client_connection():
     
     try:
         # JSON 설정 로드 및 초기화
-        await client.initialize("mcp_servers.json")
+        # 환경변수 설정 모듈에서 설정 파일 경로 가져오기
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        await client.initialize(config_path)
         
         # 서버 정보 확인
         servers = client.get_server_names()
@@ -70,7 +74,10 @@ async def test_json_config_loading():
     print("=== JSON 설정 로딩 테스트 ===")
     
     try:
-        with open("mcp_servers.json", 'r', encoding='utf-8') as f:
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         
         print("JSON 설정 로드 성공:")

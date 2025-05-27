@@ -2,6 +2,13 @@
 """실제 MCP 도구 호출 테스트"""
 
 import asyncio
+import sys
+from pathlib import Path
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 from mcp_host.adapters.enhanced_client import create_enhanced_client
 from mcp_host.config import create_config_manager
 
@@ -11,10 +18,13 @@ async def test_real_mcp():
     print('🔧 실제 MCP 도구 호출 테스트')
     
     config_manager = create_config_manager()
-    client = create_enhanced_client(config_manager)
+    client = create_enhanced_client()
     
     try:
-        await client.initialize('mcp_servers.json')
+        from mcp_host.config.env_config import get_settings
+        settings = get_settings()
+        config_path = settings.get_mcp_servers_config_path()
+        await client.initialize(config_path)
         print(f'✅ 클라이언트 초기화: {len(client.get_tools())}개 도구')
         
         # 도구 목록 확인
