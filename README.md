@@ -65,15 +65,15 @@ MCP는 AI 애플리케이션이 다양한 데이터 소스와 도구에 안전�
 
 ```mermaid
 graph TD;
-    __start__([시작]):::first
-    parse_message(메시지 파싱)
-    call_mcp_tool(MCP 도구 호출)
-    generate_response(응답 생성)
-    react_think(ReAct: 사고)
-    react_act(ReAct: 행동)
-    react_observe(ReAct: 관찰)
-    react_finalize(ReAct: 최종화)
-    __end__([종료]):::last
+    __start__([Start]):::first
+    parse_message(Parse)
+    call_mcp_tool(MCP tool call)
+    generate_response(Response)
+    react_think(ReAct: think)
+    react_act(ReAct: act)
+    react_observe(ReAct: observe)
+    react_finalize(ReAct: finalize)
+    __end__([End]):::last
     
     __start__ --> parse_message
     
